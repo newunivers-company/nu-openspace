@@ -107,6 +107,9 @@ openspace-download-skill = "openspace.cloud.cli.download_skill:main"
 openspace-upload-skill = "openspace.cloud.cli.upload_skill:main"
 openspace-dashboard = "openspace.entrypoints.dashboard.server:main"
 openspace-gateway = "openspace.entrypoints.gateway.server:run_main"
+openspace-evidence = "openspace.evidence.cli:main"
+openspace-skill-package = "openspace.skill_package.cli:main"
+openspace-nu-approval = "openspace.integrations.newunivers.approval_cli:main"
 
 [tool.setuptools]
 packages = {find = {where = ["."], include = ["openspace*"]}}

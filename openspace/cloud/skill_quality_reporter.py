@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from concurrent.futures import Future as ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -22,13 +23,14 @@ from openspace.cloud.telemetry_payloads import (
 )
 from openspace.config.constants import PROJECT_ROOT
 from openspace.skill_engine.types import ExecutionAnalysis, SkillJudgment
+from openspace.skill_engine.quality import classify_skill_outcome
 from openspace.utils.logging import Logger
 
 
 logger = Logger.get_logger(__name__)
 
 QUALITY_EVENT_KIND = "skill_judgment"
-QUALITY_SCHEMA_VERSION = "skill_quality_v1"
+QUALITY_SCHEMA_VERSION = "skill_quality_v2"
 QUALITY_DENOMINATOR = "analyzer_judged_skill_use"
 EXECUTOR_POLL_INTERVAL_SECONDS = 0.01
 
@@ -219,7 +221,23 @@ def build_skill_quality_judgment_payload(
     skill_phase_failed = local_skill_id in skill_phase_failed_ids
     completed = skill_applied and task_completed and not skill_phase_failed
     fallback = skill_phase_failed or not task_completed
-    status = "success" if completed and not fallback else "failed"
+    attribution = classify_skill_outcome(analysis, judgment)
+    status = attribution.status
+    raw_duration_ms = getattr(analysis, "duration_ms", None)
+    if raw_duration_ms is None:
+        execution_time = getattr(analysis, "execution_time", None)
+        raw_duration_ms = (
+            round(float(execution_time) * 1000)
+            if isinstance(execution_time, (int, float))
+            else None
+        )
+    duration_ms = (
+        max(0, int(raw_duration_ms))
+        if isinstance(raw_duration_ms, (int, float))
+        and not isinstance(raw_duration_ms, bool)
+        and math.isfinite(float(raw_duration_ms))
+        else None
+    )
 
     return build_skill_use_report_payload(
         request_id=short_cloud_request_id(
@@ -234,8 +252,15 @@ def build_skill_quality_judgment_payload(
         cloud_skill_id=cloud_skill_id,
         session_id=session_id,
         local_skill_id=local_skill_id,
-        duration_ms=None,
-        failure_reason=None if status == "success" else "unknown",
+        duration_ms=duration_ms,
+        failure_reason=(
+            None if status == "success" else attribution.failure_domain.value
+        ),
+        error_code=(
+            None
+            if status == "success"
+            else f"QUALITY_{attribution.failure_domain.value.upper()}"
+        ),
         redaction_level="abstract_only",
         redaction_performed_by="client",
         redaction_policy_version=REDACTION_POLICY_VERSION,
@@ -247,6 +272,13 @@ def build_skill_quality_judgment_payload(
         skill_phase_failed=skill_phase_failed,
         completed=completed,
         fallback=fallback,
+        extras={
+            "attributable_to_skill": attribution.attributable_to_skill,
+            "counts_toward_skill_quality": attribution.counts_toward_skill_quality,
+            "attribution_confidence": attribution.confidence,
+            "attribution_signals": list(attribution.signals),
+            "failure_domain": attribution.failure_domain.value,
+        },
     )
 
 

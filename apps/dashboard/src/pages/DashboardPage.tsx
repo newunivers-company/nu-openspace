@@ -56,6 +56,13 @@ export default function DashboardPage() {
         <MetricCard label={t('dashboard.workflowSuccess')} value={`${data.workflows.average_success_rate.toFixed(1)}%`} hint={t('dashboard.avgSuccessHint')} />
       </section>
 
+      <section className="metrics-row">
+        <MetricCard label={t('dashboard.verifiedEvidence')} value={`${data.observability.evidence.verified}/${data.observability.evidence.total}`} hint={t('dashboard.invalidEvidenceHint', { count: data.observability.evidence.invalid })} />
+        <MetricCard label={t('dashboard.qualityConfidence')} value={`${(data.observability.quality.confidence_low * 100).toFixed(1)}%`} hint={t('dashboard.qualityConfidenceHint', { count: data.observability.quality.distinct_tasks })} />
+        <MetricCard label={t('dashboard.activeExecutions')} value={data.observability.execution_journal.active} hint={t('dashboard.executionJournalHint', { count: data.observability.execution_journal.total })} />
+        <MetricCard label={t('dashboard.accountedCost')} value={`$${data.observability.cost.total_usd.toFixed(4)}`} hint={t('dashboard.costHint', { count: data.observability.cost.sessions_with_cost })} />
+      </section>
+
       <section>
         <div className="panel-surface p-5 space-y-4">
           <div>
@@ -69,6 +76,42 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between"><span className="text-muted">{t('dashboard.workflowCount')}</span><span>{data.health.workflow_count}</span></div>
             <div className="flex items-center justify-between"><span className="text-muted">{t('dashboard.builtFrontend')}</span><span>{data.health.frontend_dist_exists ? t('common.yes') : t('common.no')}</span></div>
           </div>
+        </div>
+      </section>
+
+      <section>
+        <div className="panel-surface p-5 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-[0.16em] text-muted">{t('dashboard.governance')}</div>
+              <h2 className="text-2xl font-bold font-serif mt-1">{t('dashboard.integritySnapshot')}</h2>
+            </div>
+            <span className={`chip ${data.observability.evidence.invalid > 0 ? 'text-danger' : 'text-accent'}`}>
+              {data.observability.evidence.invalid > 0 ? t('dashboard.attentionRequired') : t('dashboard.integrityHealthy')}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <div className="flex items-center justify-between gap-3"><span className="text-muted">{t('dashboard.signedEvidence')}</span><span>{data.observability.evidence.signed_verified}</span></div>
+            <div className="flex items-center justify-between gap-3"><span className="text-muted">{t('dashboard.unsignedEvidence')}</span><span>{data.observability.evidence.unsigned}</span></div>
+            <div className="flex items-center justify-between gap-3"><span className="text-muted">{t('dashboard.qualitySamples')}</span><span>{data.observability.quality.included_observations}</span></div>
+            <div className="flex items-center justify-between gap-3"><span className="text-muted">{t('dashboard.promotionReady')}</span><span>{data.observability.quality.promotion_ready}</span></div>
+            <div className="flex items-center justify-between gap-3"><span className="text-muted">{t('dashboard.completedExecutions')}</span><span>{data.observability.execution_journal.by_state.completed ?? 0}</span></div>
+            <div className="flex items-center justify-between gap-3"><span className="text-muted">{t('dashboard.deniedSecurityEvents')}</span><span>{data.observability.security_audit.by_outcome.denied ?? 0}</span></div>
+          </div>
+          {data.observability.evidence.recent.length > 0 && (
+            <div className="border-t border-border pt-4 space-y-2">
+              <div className="text-xs uppercase tracking-[0.14em] text-muted">{t('dashboard.recentEvidence')}</div>
+              {data.observability.evidence.recent.slice(0, 3).map((manifest) => (
+                <div key={manifest.path} className="record-card px-4 py-3 flex items-center justify-between gap-4 text-sm">
+                  <div className="min-w-0">
+                    <div className="font-bold truncate">{manifest.task_id || t('dashboard.unknownTask')}</div>
+                    <div className="text-xs text-muted truncate">{manifest.manifest_id || manifest.path}</div>
+                  </div>
+                  <span className={manifest.status === 'verified' ? 'text-accent' : 'text-danger'}>{manifest.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 

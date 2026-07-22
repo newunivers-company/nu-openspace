@@ -384,6 +384,38 @@ def test_trust_promotion_threshold_is_configurable(tmp_path: Path) -> None:
         store.close()
 
 
+def test_trust_promotion_requires_distinct_tasks(tmp_path: Path) -> None:
+    store = SkillStore(
+        tmp_path / "skills.db",
+        trust_promotion_min_independent_successes=2,
+    )
+    try:
+        record = _captured_record()
+        _save(store, record)
+        for observation_id in ("attempt:one", "attempt:two"):
+            asyncio.run(
+                store.record_trust_observation(
+                    record.skill_id,
+                    observation_id,
+                    "success",
+                    task_id="same-task",
+                )
+            )
+        assert store.load_record(record.skill_id).trust_state == SkillTrustState.PROVISIONAL
+
+        asyncio.run(
+            store.record_trust_observation(
+                record.skill_id,
+                "attempt:three",
+                "success",
+                task_id="different-task",
+            )
+        )
+        assert store.load_record(record.skill_id).trust_state == SkillTrustState.TRUSTED
+    finally:
+        store.close()
+
+
 def test_only_attributable_failure_demotes_trusted_skill(tmp_path: Path) -> None:
     store = SkillStore(tmp_path / "skills.db")
     try:

@@ -118,6 +118,40 @@ class NuResourcePreflightTool(_BaseMetaTool):
         )
 
 
+class NuResourceExecuteTool(_BaseMetaTool):
+    _name = "nu_resource_execute"
+    _description = (
+        "Execute a NewUnivers resource request through signed approval and budget guards. "
+        "Defaults to dry-run; live mode requires operator-controlled environment capability."
+    )
+    _is_read_only = False
+    _is_concurrency_safe = False
+
+    async def _arun(
+        self,
+        candidate_id: str,
+        prompt: str = "",
+        params_json: str = "{}",
+        media_json: str = "{}",
+        approval_path: str = "",
+        dry_run: bool = True,
+    ) -> ToolResult:
+        import asyncio
+
+        from openspace.integrations.newunivers import governed_resource_execute
+
+        result = await asyncio.to_thread(
+            governed_resource_execute,
+            candidate_id=candidate_id,
+            prompt=prompt,
+            params_json=params_json,
+            media_json=media_json,
+            approval_path=approval_path,
+            dry_run=dry_run,
+        )
+        return _success(result)
+
+
 def optional_meta_tool_classes() -> list[type[_BaseMetaTool]]:
     """Discover integrations without importing optional provider packages."""
 
@@ -128,4 +162,10 @@ def optional_meta_tool_classes() -> list[type[_BaseMetaTool]]:
         classes.extend(
             [NuResourceCatalogTool, NuResourceHealthTool, NuResourcePreflightTool]
         )
+        from openspace.integrations.newunivers.governance import (
+            governed_resource_execution_tool_enabled,
+        )
+
+        if governed_resource_execution_tool_enabled():
+            classes.append(NuResourceExecuteTool)
     return classes

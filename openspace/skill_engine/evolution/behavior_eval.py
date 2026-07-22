@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -59,6 +60,43 @@ _OPTIONAL_REPLAY_INFRA_FAILURES = {
     "missing_executable_eval_evidence",
     "replay_tasks_require_external_runner",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class ReplaySafetyPolicy:
+    """Post-replay gates for sample sufficiency, cost, and canary evidence."""
+
+    min_executable_tasks: int = 1
+    max_cost_regression_ratio: float = 0.10
+    min_score_gain_for_cost_regression: float = 0.02
+    require_cost_metrics: bool = False
+    require_canary: bool = False
+    min_canary_samples: int = 1
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "min_executable_tasks", max(1, int(self.min_executable_tasks)))
+        max_cost_regression_ratio = float(self.max_cost_regression_ratio)
+        min_score_gain = float(self.min_score_gain_for_cost_regression)
+        if not math.isfinite(max_cost_regression_ratio) or max_cost_regression_ratio < 0:
+            raise ValueError("max_cost_regression_ratio must be finite and non-negative")
+        if not math.isfinite(min_score_gain) or min_score_gain < 0:
+            raise ValueError(
+                "min_score_gain_for_cost_regression must be finite and non-negative"
+            )
+        object.__setattr__(
+            self,
+            "max_cost_regression_ratio",
+            max_cost_regression_ratio,
+        )
+        object.__setattr__(
+            self,
+            "min_score_gain_for_cost_regression",
+            min_score_gain,
+        )
+        object.__setattr__(self, "min_canary_samples", max(1, int(self.min_canary_samples)))
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +294,7 @@ class SkillBehaviorEvaluator:
         require_routing_eval: bool = False,
         require_replay_runner: bool = True,
         routing_top_k: int = 2,
+        replay_safety_policy: ReplaySafetyPolicy | None = None,
     ) -> None:
         self.evidence_store = evidence_store
         self.registry = registry
@@ -268,6 +307,7 @@ class SkillBehaviorEvaluator:
         self.require_routing_eval = bool(require_routing_eval)
         self.require_replay_runner = bool(require_replay_runner)
         self.routing_top_k = max(1, int(routing_top_k))
+        self.replay_safety_policy = replay_safety_policy or ReplaySafetyPolicy()
 
     async def evaluate(
         self,
@@ -644,12 +684,17 @@ class SkillBehaviorEvaluator:
                 candidate_revision_set=candidate_revision_set,
                 failures=[f"replay_runner_error:{str(exc)[:300]}"],
             )
-        return _normalize_replay_result(
+        normalized = _normalize_replay_result(
             raw,
             runner_name=type(runner).__name__,
             baseline_revision_set=baseline_revision_set,
             candidate_revision_set=candidate_revision_set,
             evidence_store=self.evidence_store,
+        )
+        return _apply_replay_safety_policy(
+            normalized,
+            raw.to_dict() if isinstance(raw, ReplayEvalResult) else raw,
+            self.replay_safety_policy,
         )
 
     def _persist(self, result: SkillBehaviorEvalResult) -> None:
@@ -1429,6 +1474,125 @@ def _normalize_replay_details(raw: Mapping[str, Any]) -> dict[str, Any]:
     return details
 
 
+def _apply_replay_safety_policy(
+    result: ReplayEvalResult,
+    raw: Any,
+    policy: ReplaySafetyPolicy,
+) -> ReplayEvalResult:
+    """Apply deterministic safety gates after the runner result is normalized."""
+
+    mapping = raw if isinstance(raw, Mapping) else {}
+    failures = list(result.failures)
+    warnings = list(result.warnings)
+    details = dict(result.details)
+    task_results = _replay_task_result_mappings(mapping)
+    executable_task_ids: set[str] = set()
+    for index, item in enumerate(task_results):
+        if _replay_task_result_has_executable_evidence(item):
+            executable_task_ids.add(
+                str(item.get("task_id") or item.get("id") or f"index:{index}")
+            )
+    executable_count = len(executable_task_ids)
+    if result.attempted and executable_count < policy.min_executable_tasks:
+        failures.append(
+            "insufficient_executable_replay_tasks:"
+            f"{executable_count}:{policy.min_executable_tasks}"
+        )
+
+    baseline_cost = result.baseline_cost
+    candidate_cost = result.candidate_cost
+    cost_ratio: float | None = None
+    cost_decision = "not_evaluated"
+    if baseline_cost is None or candidate_cost is None:
+        if policy.require_cost_metrics:
+            failures.append("missing_replay_cost_metrics")
+            cost_decision = "missing_required_metrics"
+    else:
+        if baseline_cost < 0 or candidate_cost < 0:
+            failures.append("invalid_negative_replay_cost")
+            cost_decision = "invalid"
+        else:
+            if baseline_cost == 0:
+                cost_ratio = 0.0 if candidate_cost == 0 else float("inf")
+            else:
+                cost_ratio = (candidate_cost - baseline_cost) / baseline_cost
+            score_gain = (
+                result.candidate_score - result.baseline_score
+                if result.candidate_score is not None and result.baseline_score is not None
+                else None
+            )
+            if cost_ratio > policy.max_cost_regression_ratio:
+                if baseline_cost == 0:
+                    cost_decision = "rejected"
+                    failures.append("candidate_cost_regressed_from_zero")
+                elif (
+                    score_gain is not None
+                    and score_gain + 1e-9
+                    >= policy.min_score_gain_for_cost_regression
+                ):
+                    cost_decision = "accepted_for_quality_gain"
+                    warnings.append("candidate_cost_increase_accepted_for_quality_gain")
+                else:
+                    cost_decision = "rejected"
+                    failures.append("candidate_cost_regressed")
+            else:
+                cost_decision = "within_budget"
+
+    raw_details = _dict_or_empty(mapping.get("details"))
+    canary = mapping.get("canary") or raw_details.get("canary")
+    canary_mapping = _dict_or_empty(canary)
+    canary_attempted = bool(canary_mapping)
+    canary_passed = _bool_or_none(canary_mapping.get("passed"))
+    canary_status = str(canary_mapping.get("status") or "").strip().lower()
+    try:
+        canary_samples = int(
+            canary_mapping.get("sample_count")
+            or canary_mapping.get("samples")
+            or 0
+        )
+    except (TypeError, ValueError):
+        canary_samples = 0
+    if policy.require_canary and not canary_attempted:
+        failures.append("missing_required_canary")
+    if canary_attempted:
+        if canary_passed is False or canary_status in {"failed", "error", "rolled_back"}:
+            failures.append("canary_failed")
+        elif canary_passed is not True and canary_status not in {"passed", "healthy", "completed"}:
+            failures.append("canary_pass_signal_missing")
+        if canary_samples < policy.min_canary_samples:
+            failures.append(
+                f"insufficient_canary_samples:{canary_samples}:{policy.min_canary_samples}"
+            )
+
+    details["safety_policy"] = {
+        **policy.to_dict(),
+        "executable_task_count": executable_count,
+        "cost_regression_ratio": cost_ratio,
+        "cost_decision": cost_decision,
+        "canary_attempted": canary_attempted,
+        "canary_samples": canary_samples,
+    }
+    failures = _dedupe(failures)
+    return ReplayEvalResult(
+        attempted=result.attempted,
+        passed=result.passed and not failures,
+        runner=result.runner,
+        replay_run_id=result.replay_run_id,
+        sandbox_run_id=result.sandbox_run_id,
+        judge_result_id=result.judge_result_id,
+        baseline_revision_set=list(result.baseline_revision_set),
+        candidate_revision_set=list(result.candidate_revision_set),
+        baseline_score=result.baseline_score,
+        candidate_score=result.candidate_score,
+        baseline_cost=result.baseline_cost,
+        candidate_cost=result.candidate_cost,
+        artifact_refs=list(result.artifact_refs),
+        details=details,
+        failures=failures,
+        warnings=_dedupe(warnings),
+    )
+
+
 def _replay_task_result_failures(raw: Mapping[str, Any]) -> list[str]:
     if _allows_failed_replay_tasks(raw):
         return []
@@ -2088,6 +2252,7 @@ def _dedupe(values: list[Any]) -> list[str]:
 
 def _float_or_none(value: Any) -> float | None:
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return None
+    return parsed if math.isfinite(parsed) else None

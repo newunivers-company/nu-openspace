@@ -22,6 +22,7 @@ from .capture_semantic import CaptureContractSemanticReviewer
 from .behavior_eval import (
     ContractEvalResult,
     ReplayEvalResult,
+    ReplaySafetyPolicy,
     RoutingEvalResult,
     SkillBehaviorEvalResult,
     SkillBehaviorEvaluator,
@@ -58,6 +59,7 @@ __all__ = [
     "EvidenceRefAccessError",
     "ContractEvalResult",
     "ReplayEvalResult",
+    "ReplaySafetyPolicy",
     "RoutingEvalResult",
     "SkillAssertion",
     "SkillAuthoringContract",

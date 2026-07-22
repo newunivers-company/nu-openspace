@@ -1334,6 +1334,20 @@ class SkillStore:
             ).fetchone()[0]
             or 0
         )
+        distinct_success_tasks_since_failure = int(
+            self._conn.execute(
+                """
+                SELECT COUNT(DISTINCT CASE
+                    WHEN TRIM(task_id)<>'' THEN 'task:' || task_id
+                    ELSE 'observation:' || observation_id
+                END)
+                FROM skill_trust_observations
+                WHERE skill_id=? AND outcome='success' AND id>?
+                """,
+                (skill_id, last_failure_id),
+            ).fetchone()[0]
+            or 0
+        )
 
         previous_state = SkillTrustState(
             str(record_row["trust_state"] or SkillTrustState.TRUSTED.value)
@@ -1343,7 +1357,7 @@ class SkillStore:
             next_state = SkillTrustState.PROVISIONAL
         elif (
             previous_state == SkillTrustState.PROVISIONAL
-            and successes_since_failure
+            and distinct_success_tasks_since_failure
             >= self.trust_promotion_min_independent_successes
         ):
             next_state = SkillTrustState.TRUSTED
@@ -1363,6 +1377,9 @@ class SkillStore:
             "trust_successes": successes,
             "trust_failures": failures,
             "successes_since_failure": successes_since_failure,
+            "distinct_success_tasks_since_failure": (
+                distinct_success_tasks_since_failure
+            ),
             "previous_trust_state": previous_state.value,
             "trust_state": next_state.value,
         }

@@ -5,6 +5,8 @@ export interface OverviewResponse {
     evidence_db_path: string;
     workflow_count: number;
     frontend_dist_exists: boolean;
+    evidence_manifests_verified: number;
+    execution_journal_active: number;
   };
   pipeline: PipelineStage[];
   skills: {
@@ -17,6 +19,70 @@ export interface OverviewResponse {
     total: number;
     average_success_rate: number;
     recent: WorkflowSummary[];
+  };
+  observability: ObservabilitySnapshot;
+}
+
+export interface EvidenceManifestSummary {
+  path: string;
+  manifest_id?: string | null;
+  created_at?: string | null;
+  task_id?: string | null;
+  session_id?: string | null;
+  run_status?: string | null;
+  status: string;
+  signature_status: string;
+  verified_artifacts: number;
+  errors: string[];
+}
+
+export interface ObservabilitySnapshot {
+  evidence: {
+    schema_version: number;
+    total: number;
+    verified: number;
+    invalid: number;
+    signed_verified: number;
+    unsigned: number;
+    scan_limited: boolean;
+    recent: EvidenceManifestSummary[];
+  };
+  quality: {
+    schema_version: string;
+    skills_with_observations: number;
+    promotion_ready: number;
+    score: number;
+    confidence_low: number;
+    confidence_high: number;
+    effective_samples: number;
+    included_observations: number;
+    excluded_observations: number;
+    distinct_tasks: number;
+    distinct_sessions: number;
+    distinct_evidence_domains: number;
+    failure_domains: Record<string, number>;
+  };
+  execution_journal: {
+    path: string;
+    exists: boolean;
+    total: number;
+    active: number;
+    terminal: number;
+    by_state: Record<string, number>;
+    error?: string;
+  };
+  cost: {
+    currency: string;
+    workflow_total_usd: number;
+    resource_total_usd: number;
+    total_usd: number;
+    sessions_with_cost: number;
+    sessions_inspected: number;
+    average_session_usd: number;
+  };
+  security_audit: {
+    total: number;
+    by_outcome: Record<string, number>;
   };
 }
 

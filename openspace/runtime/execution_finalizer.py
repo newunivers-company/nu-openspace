@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from typing import Any
 
 from openspace.utils.logging import Logger
 
 logger = Logger.get_logger(__name__)
+
+
+def _manifest_inventory_values(values: Any) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    normalized: list[str] = []
+    for value in values:
+        if isinstance(value, dict):
+            item = value.get("skill_id") or value.get("id") or value.get("name")
+        else:
+            item = getattr(value, "skill_id", None) or getattr(value, "name", None) or value
+        if item:
+            normalized.append(str(item))
+    return list(dict.fromkeys(normalized))
 
 
 class ExecutionFinalizer:
@@ -34,6 +50,7 @@ class ExecutionFinalizer:
         recording_manager = self.state.recording_manager
         if recording_manager and recording_manager.recording_status:
             recording_dir = recording_manager.trajectory_dir
+        recording_stop_attempted = False
 
         final_result = {
             **result,
@@ -87,6 +104,16 @@ class ExecutionFinalizer:
                 execution_context=execution_context,
             )
 
+            # The recording is an input to post-execution analysis. Flush it
+            # first so inline analyzers never inspect a partially written run.
+            recording_stop_attempted = True
+            await self._stop_recording(
+                recording_manager=recording_manager,
+                task_id=task_id,
+                start_time=start_time,
+                result=result,
+            )
+
             post_execution_mode = self.post_execution_mode()
             if cancelled_exc is None and post_execution_mode == "inline":
                 post_execution = self.run_post_execution_tasks(
@@ -115,6 +142,23 @@ class ExecutionFinalizer:
                 else:
                     final_result["evolved_skills"] = list(evolved_skills)
 
+            if cancelled_exc is None:
+                await self._maybe_report_cloud_task_trace(
+                    task_id=task_id,
+                    final_result=final_result,
+                    execution_context=execution_context,
+                )
+
+            await self._write_verifiable_evidence_manifest(
+                task_id=task_id,
+                recording_dir=recording_dir,
+                final_result=final_result,
+                execution_context=execution_context,
+            )
+
+            # Background evolution owns a separate lifecycle. Launch it only
+            # after the primary run manifest is sealed so it cannot race the
+            # evidence scan for this execution.
             if cancelled_exc is None and post_execution_mode == "background":
                 self.schedule_post_execution_tasks(
                     task_id,
@@ -124,21 +168,148 @@ class ExecutionFinalizer:
                     capture_skill_dir=capture_skill_dir,
                 )
 
-            if cancelled_exc is None:
-                await self._maybe_report_cloud_task_trace(
-                    task_id=task_id,
-                    final_result=final_result,
-                    execution_context=execution_context,
-                )
-
             return final_result
         finally:
-            await self._stop_recording(
-                recording_manager=recording_manager,
-                task_id=task_id,
-                start_time=start_time,
-                result=result,
+            if not recording_stop_attempted:
+                await self._stop_recording(
+                    recording_manager=recording_manager,
+                    task_id=task_id,
+                    start_time=start_time,
+                    result=result,
+                )
+
+    async def _write_verifiable_evidence_manifest(
+        self,
+        *,
+        task_id: str,
+        recording_dir: str | None,
+        final_result: dict[str, Any],
+        execution_context: dict[str, Any],
+    ) -> None:
+        """Create and immediately verify the content-addressed session manifest."""
+
+        if not bool(getattr(self.config, "evidence_manifest_enabled", True)):
+            final_result["evidence_manifest"] = {
+                "status": "disabled",
+                "schema_version": 3,
+            }
+            return
+        storage = self.session_storage
+        if storage is None:
+            final_result["evidence_manifest"] = {
+                "status": "skipped",
+                "reason": "session_storage_unavailable",
+                "schema_version": 3,
+            }
+            return
+
+        try:
+            from openspace.evidence import create_run_manifest, verify_manifest
+
+            signing_key_env = str(
+                getattr(
+                    self.config,
+                    "evidence_manifest_signing_key_env",
+                    "OPENSPACE_EVIDENCE_SIGNING_KEY",
+                )
+                or "OPENSPACE_EVIDENCE_SIGNING_KEY"
             )
+            signing_key = os.environ.get(signing_key_env)
+            require_signature = bool(
+                getattr(self.config, "evidence_manifest_require_signature", False)
+            )
+            if require_signature and not signing_key:
+                raise ValueError(
+                    f"required evidence signing key is missing: {signing_key_env}"
+                )
+
+            replay_argv = execution_context.get("evidence_replay_argv")
+            if not isinstance(replay_argv, list):
+                raw_replay = os.environ.get("OPENSPACE_EVIDENCE_REPLAY_ARGV_JSON", "")
+                replay_argv = json.loads(raw_replay) if raw_replay else None
+            if replay_argv is not None and (
+                not isinstance(replay_argv, list)
+                or any(not isinstance(item, str) or not item for item in replay_argv)
+            ):
+                raise ValueError("evidence replay argv must be a list of non-empty strings")
+
+            skills = final_result.get("active_skills") or final_result.get("skills_used") or []
+            tools: list[str] = []
+            for value in final_result.get("retrieved_tools_list") or []:
+                name = value.get("name") if isinstance(value, dict) else value
+                if name:
+                    tools.append(str(name))
+            for value in final_result.get("tool_executions") or []:
+                if isinstance(value, dict):
+                    name = value.get("tool") or value.get("tool_name") or value.get("name")
+                    if name:
+                        tools.append(str(name))
+            model_names = [
+                getattr(self.config, field, None)
+                for field in (
+                    "llm_model",
+                    "tool_retrieval_model",
+                    "skill_registry_model",
+                    "execution_analyzer_model",
+                    "skill_evolver_model",
+                )
+            ]
+            run = {
+                "task_id": task_id,
+                "session_id": str(self.current_session_id or ""),
+                "status": str(final_result.get("status") or "unknown"),
+                "execution_time_s": final_result.get("execution_time"),
+                "iterations": final_result.get("iterations"),
+                "permission_mode": final_result.get("permission_mode"),
+                "recording_dir": recording_dir,
+            }
+            inventory = {
+                "models": list(dict.fromkeys(str(item) for item in model_names if item)),
+                "skills": _manifest_inventory_values(skills),
+                "tools": list(dict.fromkeys(tools)),
+            }
+            workspace_root = (
+                execution_context.get("cwd")
+                or execution_context.get("original_cwd")
+                or getattr(self.config, "workspace_dir", None)
+            )
+            manifest = await asyncio.to_thread(
+                create_run_manifest,
+                storage.session_dir,
+                run=run,
+                inventory=inventory,
+                workspace_root=workspace_root,
+                replay_argv=replay_argv,
+                signing_key=signing_key,
+                signing_key_id=str(
+                    getattr(self.config, "evidence_manifest_signing_key_id", "local")
+                    or "local"
+                ),
+            )
+            manifest_path = storage.session_dir / "evidence-manifest-v3.json"
+            verification = await asyncio.to_thread(
+                verify_manifest,
+                manifest_path,
+                signing_key=signing_key,
+                require_signature=require_signature,
+            )
+            final_result["evidence_manifest"] = {
+                "status": "verified" if verification["ok"] else "invalid",
+                "path": str(manifest_path),
+                "manifest_id": manifest.get("manifest_id"),
+                "schema_version": 3,
+                "signature_status": verification.get("signature_status"),
+                "verified_artifacts": verification.get("verified_artifacts", 0),
+                "errors": verification.get("errors", []),
+            }
+        except Exception as exc:
+            logger.warning("Failed to create Evidence Plane v3 manifest: %s", exc)
+            final_result["evidence_manifest"] = {
+                "status": "failed",
+                "schema_version": 3,
+                "error": type(exc).__name__,
+                "reason": str(exc)[:300],
+            }
 
     async def _stop_recording(
         self,

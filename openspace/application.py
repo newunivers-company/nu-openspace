@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import inspect
+import math
 import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -153,6 +154,10 @@ class OpenSpaceConfig:
     workspace_dir: Optional[str] = None
     capture_skill_dir: Optional[str] = None
     session_storage_dir: Optional[str] = None
+    execution_journal_enabled: bool = True
+    execution_journal_path: Optional[str] = None
+    execution_journal_lease_s: float = 900.0
+    execution_journal_max_result_bytes: int = 2 * 1024 * 1024
     
     # Recording Configuration
     enable_recording: bool = True
@@ -164,6 +169,13 @@ class OpenSpaceConfig:
     post_execution_mode: str = "inline"  # inline | background | disabled
     post_execution_timeout_s: float = 0.0
     memory_drain_timeout_s: Optional[float] = None
+
+    # Verifiable Evidence Plane v3. The HMAC key itself is read only from the
+    # named environment variable and is never copied into runtime state.
+    evidence_manifest_enabled: bool = True
+    evidence_manifest_require_signature: bool = False
+    evidence_manifest_signing_key_env: str = "OPENSPACE_EVIDENCE_SIGNING_KEY"
+    evidence_manifest_signing_key_id: str = "local"
 
     # Low-latency runtime controls.
     capability_profile: str = "batch_full"
@@ -219,6 +231,12 @@ class OpenSpaceConfig:
     evolution_replay_command: Optional[str] = None
     evolution_replay_docker_image: Optional[str] = None
     evolution_replay_timeout_s: float = 600.0
+    evolution_replay_min_executable_tasks: int = 1
+    evolution_replay_max_cost_regression_ratio: float = 0.10
+    evolution_replay_min_score_gain_for_cost_regression: float = 0.02
+    evolution_replay_require_cost_metrics: bool = False
+    evolution_canary_required: bool = False
+    evolution_canary_min_samples: int = 1
     quality_signal_detector_enabled: bool = True
     quality_signal_trigger_enabled: bool = True
     quality_signal_reconciliation_enabled: bool = True
@@ -231,6 +249,60 @@ class OpenSpaceConfig:
     
     def __post_init__(self):
         """Validate configuration"""
+        self.execution_journal_enabled = _env_bool(
+            "OPENSPACE_EXECUTION_JOURNAL_ENABLED",
+            self.execution_journal_enabled,
+        )
+        self.execution_journal_path = (
+            self.execution_journal_path
+            or os.environ.get("OPENSPACE_EXECUTION_JOURNAL_PATH")
+        )
+        raw_journal_lease = os.environ.get("OPENSPACE_EXECUTION_JOURNAL_LEASE_S")
+        if raw_journal_lease is not None:
+            try:
+                self.execution_journal_lease_s = float(raw_journal_lease)
+            except ValueError:
+                raise ValueError("OPENSPACE_EXECUTION_JOURNAL_LEASE_S must be a number") from None
+        self.execution_journal_lease_s = float(self.execution_journal_lease_s)
+        if not math.isfinite(self.execution_journal_lease_s):
+            raise ValueError("OPENSPACE_EXECUTION_JOURNAL_LEASE_S must be finite")
+        self.execution_journal_lease_s = max(1.0, self.execution_journal_lease_s)
+        raw_journal_result = os.environ.get(
+            "OPENSPACE_EXECUTION_JOURNAL_MAX_RESULT_BYTES"
+        )
+        if raw_journal_result is not None:
+            try:
+                self.execution_journal_max_result_bytes = int(raw_journal_result)
+            except ValueError:
+                raise ValueError(
+                    "OPENSPACE_EXECUTION_JOURNAL_MAX_RESULT_BYTES must be an integer"
+                ) from None
+        self.execution_journal_max_result_bytes = max(
+            1024,
+            int(self.execution_journal_max_result_bytes),
+        )
+        self.evidence_manifest_enabled = _env_bool(
+            "OPENSPACE_EVIDENCE_MANIFEST_ENABLED",
+            self.evidence_manifest_enabled,
+        )
+        self.evidence_manifest_require_signature = _env_bool(
+            "OPENSPACE_EVIDENCE_REQUIRE_SIGNATURE",
+            self.evidence_manifest_require_signature,
+        )
+        self.evidence_manifest_signing_key_env = str(
+            os.environ.get(
+                "OPENSPACE_EVIDENCE_SIGNING_KEY_ENV",
+                self.evidence_manifest_signing_key_env,
+            )
+            or "OPENSPACE_EVIDENCE_SIGNING_KEY"
+        ).strip()
+        self.evidence_manifest_signing_key_id = str(
+            os.environ.get(
+                "OPENSPACE_EVIDENCE_SIGNING_KEY_ID",
+                self.evidence_manifest_signing_key_id,
+            )
+            or "local"
+        ).strip()
         env_analyzer_max_tokens = os.environ.get(
             "OPENSPACE_EXECUTION_ANALYZER_MAX_TOKENS"
         )
@@ -562,6 +634,53 @@ class OpenSpaceConfig:
         self.evolution_replay_timeout_s = max(
             1.0,
             float(self.evolution_replay_timeout_s),
+        )
+        for env_name, field_name, minimum in (
+            (
+                "OPENSPACE_EVOLUTION_REPLAY_MIN_EXECUTABLE_TASKS",
+                "evolution_replay_min_executable_tasks",
+                1,
+            ),
+            (
+                "OPENSPACE_EVOLUTION_CANARY_MIN_SAMPLES",
+                "evolution_canary_min_samples",
+                1,
+            ),
+        ):
+            raw_value = os.environ.get(env_name)
+            if raw_value is not None:
+                try:
+                    setattr(self, field_name, int(raw_value))
+                except ValueError:
+                    raise ValueError(f"{env_name} must be an integer") from None
+            setattr(self, field_name, max(minimum, int(getattr(self, field_name))))
+        for env_name, field_name in (
+            (
+                "OPENSPACE_EVOLUTION_REPLAY_MAX_COST_REGRESSION_RATIO",
+                "evolution_replay_max_cost_regression_ratio",
+            ),
+            (
+                "OPENSPACE_EVOLUTION_REPLAY_MIN_SCORE_GAIN_FOR_COST_REGRESSION",
+                "evolution_replay_min_score_gain_for_cost_regression",
+            ),
+        ):
+            raw_value = os.environ.get(env_name)
+            if raw_value is not None:
+                try:
+                    setattr(self, field_name, float(raw_value))
+                except ValueError:
+                    raise ValueError(f"{env_name} must be a number") from None
+            parsed_value = float(getattr(self, field_name))
+            if not math.isfinite(parsed_value) or parsed_value < 0:
+                raise ValueError(f"{env_name} must be finite and non-negative")
+            setattr(self, field_name, parsed_value)
+        self.evolution_replay_require_cost_metrics = _env_bool(
+            "OPENSPACE_EVOLUTION_REPLAY_REQUIRE_COST_METRICS",
+            self.evolution_replay_require_cost_metrics,
+        )
+        self.evolution_canary_required = _env_bool(
+            "OPENSPACE_EVOLUTION_CANARY_REQUIRED",
+            self.evolution_canary_required,
         )
         if not self.llm_model:
             raise ValueError("llm_model is required")

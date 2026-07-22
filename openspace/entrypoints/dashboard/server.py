@@ -1,23 +1,23 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import hmac
 import json
+import math
 import os
 import re
+import sqlite3
 from collections import Counter
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 from flask import (
     Flask,
     Response,
     abort,
     jsonify,
+    g,
     redirect,
     request,
     send_from_directory,
@@ -26,6 +26,7 @@ from flask import (
 
 from openspace.recording.action_recorder import analyze_agent_actions, load_agent_actions
 from openspace.recording.utils import load_recording_session
+from openspace.services.session.storage import get_sessions_dir
 from openspace.skill_engine import SkillStore
 from openspace.skill_engine.evidence import (
     EvidenceStore,
@@ -39,7 +40,14 @@ from openspace.skill_engine.evolution import (
 from openspace.skill_engine.triggers import TriggerStore
 from openspace.skill_engine.types import SkillRecord
 from openspace.utils.network import is_loopback_host
+from .auth import (
+    DashboardAuditLog,
+    DashboardAuth,
+    DashboardIdentity,
+    dashboard_auth_cookie_value,
+)
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 API_PREFIX = "/api/v1"
 _AUTH_COOKIE = "openspace_dashboard_session"
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
@@ -94,6 +102,9 @@ def create_app(
     evidence_db_path: str | Path | None = None,
     evolution_storage_root: str | Path | None = None,
     auth_token: str | None = None,
+    auth_tokens_json: str | None = None,
+    auth_audit_path: str | Path | None = None,
+    observability_roots: Iterable[str | Path] | None = None,
 ) -> Flask:
     app = Flask(__name__, static_folder=None)
     resolved_auth_token = (
@@ -101,7 +112,10 @@ def create_app(
         if auth_token is None
         else auth_token
     ).strip()
-    expected_cookie = _dashboard_auth_cookie_value(resolved_auth_token)
+    dashboard_auth_manager = DashboardAuth.from_config(
+        legacy_token=resolved_auth_token,
+        tokens_json=auth_tokens_json,
+    )
     resolved_skill_db_path = _resolve_skill_store_db_path(
         db_path=db_path,
         evolution_storage_root=evolution_storage_root,
@@ -127,28 +141,65 @@ def create_app(
         audit_evidence_store,
         skill_store,
     )
+    security_audit = DashboardAuditLog(
+        auth_audit_path
+        or os.environ.get("OPENSPACE_DASHBOARD_AUDIT_DB_PATH")
+        or resolved_evidence_db_path.parent / "dashboard-audit.db"
+    )
+    resolved_observability_roots = _dashboard_observability_roots(observability_roots)
     app.extensions["openspace_dashboard"] = {
         "skill_store": skill_store,
         "evidence_store": audit_evidence_store,
-        "auth_enabled": bool(resolved_auth_token),
+        "auth_enabled": dashboard_auth_manager.enabled,
+        "auth": dashboard_auth_manager,
+        "security_audit": security_audit,
+        "observability_roots": resolved_observability_roots,
     }
-
-    def request_is_authenticated() -> bool:
-        if not resolved_auth_token:
-            return True
-        authorization = request.headers.get("Authorization", "")
-        scheme, _, bearer = authorization.partition(" ")
-        if scheme.lower() == "bearer" and bearer:
-            return hmac.compare_digest(bearer, resolved_auth_token)
-        cookie = request.cookies.get(_AUTH_COOKIE, "")
-        return bool(cookie) and hmac.compare_digest(cookie, expected_cookie)
 
     @app.before_request
     def require_dashboard_auth() -> Any:
-        if not resolved_auth_token or request.endpoint == "dashboard_auth":
+        if request.endpoint == "dashboard_auth":
             return None
-        if request_is_authenticated():
+        if dashboard_auth_manager.enabled:
+            identity = dashboard_auth_manager.authenticate_request(
+                request.headers.get("Authorization", ""),
+                request.cookies.get(_AUTH_COOKIE, ""),
+            )
+        else:
+            identity = DashboardIdentity("local", "admin", "local", "disabled")
+        if identity is not None:
+            g.dashboard_identity = identity
+            if (
+                request.path.startswith(API_PREFIX)
+                and request.method not in {"GET", "HEAD", "OPTIONS"}
+                and not identity.has_role("operator")
+            ):
+                g.dashboard_authorization_denied = True
+                security_audit.record(
+                    identity=identity,
+                    action="authorization",
+                    method=request.method,
+                    path=request.path,
+                    outcome="denied",
+                    remote_addr=request.remote_addr or "",
+                    details={"required_role": "operator"},
+                )
+                return jsonify(
+                    {
+                        "status": "error",
+                        "error": "dashboard operator role required",
+                        "required_role": "operator",
+                    }
+                ), 403
             return None
+        security_audit.record(
+            identity=None,
+            action="authentication",
+            method=request.method,
+            path=request.path,
+            outcome="denied",
+            remote_addr=request.remote_addr or "",
+        )
         if request.path.startswith(API_PREFIX):
             response = jsonify(
                 {
@@ -168,11 +219,27 @@ def create_app(
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         if request.endpoint == "dashboard_auth":
             response.headers["Cache-Control"] = "no-store"
+        identity = getattr(g, "dashboard_identity", None)
+        if (
+            request.path.startswith(API_PREFIX)
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and identity is not None
+            and not getattr(g, "dashboard_authorization_denied", False)
+        ):
+            security_audit.record(
+                identity=identity,
+                action="mutation",
+                method=request.method,
+                path=request.path,
+                outcome="allowed" if response.status_code < 400 else "failed",
+                remote_addr=request.remote_addr or "",
+                details={"status_code": response.status_code},
+            )
         return response
 
     @app.route("/auth", methods=["GET", "POST"])
     def dashboard_auth() -> Any:
-        if not resolved_auth_token:
+        if not dashboard_auth_manager.enabled:
             return redirect("/")
         if request.method == "GET":
             return Response(_dashboard_login_page(), mimetype="text/html")
@@ -182,18 +249,47 @@ def create_app(
             if isinstance(payload, dict)
             else request.form.get("token", "")
         )
-        if not submitted or not hmac.compare_digest(submitted, resolved_auth_token):
+        identity = dashboard_auth_manager.authenticate_token(
+            submitted,
+            auth_method="cookie",
+        )
+        if identity is None:
+            security_audit.record(
+                identity=None,
+                action="login",
+                method=request.method,
+                path=request.path,
+                outcome="denied",
+                remote_addr=request.remote_addr or "",
+            )
             return Response("Invalid dashboard token", status=401, mimetype="text/plain")
+        security_audit.record(
+            identity=identity,
+            action="login",
+            method=request.method,
+            path=request.path,
+            outcome="allowed",
+            remote_addr=request.remote_addr or "",
+        )
         response = redirect("/")
         response.set_cookie(
             _AUTH_COOKIE,
-            expected_cookie,
+            dashboard_auth_manager.cookie_for_token(submitted),
             httponly=True,
             secure=request.is_secure,
             samesite="Strict",
             path="/",
         )
         return response
+
+    @app.route(f"{API_PREFIX}/auth/whoami", methods=["GET"])
+    def dashboard_whoami() -> Any:
+        identity = getattr(g, "dashboard_identity", None)
+        return jsonify(
+            identity.to_public_dict()
+            if identity is not None
+            else {"subject": "anonymous", "role": "none"}
+        )
 
     def get_store() -> SkillStore:
         return skill_store
@@ -233,6 +329,12 @@ def create_app(
             (sum((item.get("success_rate") or 0.0) for item in workflows) / len(workflows)) * 100,
             1,
         ) if workflows else 0.0
+        observability = _build_observability_snapshot(
+            skill_store=store,
+            workflow_dirs=[path for path in _discover_workflow_dirs()],
+            evidence_roots=resolved_observability_roots,
+            security_audit=security_audit,
+        )
 
         return jsonify(
             {
@@ -242,6 +344,8 @@ def create_app(
                     "evidence_db_path": str(audit_evidence_store.db_path),
                     "workflow_count": len(workflows),
                     "frontend_dist_exists": resolve_dashboard_static_dir() is not None,
+                    "evidence_manifests_verified": observability["evidence"]["verified"],
+                    "execution_journal_active": observability["execution_journal"]["active"],
                 },
                 "pipeline": PIPELINE_STAGES,
                 "skills": {
@@ -255,8 +359,25 @@ def create_app(
                     "average_success_rate": average_workflow_success,
                     "recent": workflows[:5],
                 },
+                "observability": observability,
             }
         )
+
+    @app.route(f"{API_PREFIX}/observability", methods=["GET"])
+    def observability() -> Any:
+        return jsonify(
+            _build_observability_snapshot(
+                skill_store=get_store(),
+                workflow_dirs=_discover_workflow_dirs(),
+                evidence_roots=resolved_observability_roots,
+                security_audit=security_audit,
+            )
+        )
+
+    @app.route(f"{API_PREFIX}/evidence/manifests", methods=["GET"])
+    def evidence_manifests() -> Any:
+        evidence = _build_evidence_integrity_snapshot(resolved_observability_roots)
+        return jsonify({"items": evidence.pop("recent"), "summary": evidence})
 
     @app.route(f"{API_PREFIX}/skills", methods=["GET"])
     def list_skills() -> Any:
@@ -517,7 +638,7 @@ def create_app(
 
 
 def _dashboard_auth_cookie_value(token: str) -> str:
-    return hashlib.sha256(f"openspace-dashboard:{token}".encode("utf-8")).hexdigest()
+    return dashboard_auth_cookie_value(token)
 
 
 def _dashboard_login_page() -> str:
@@ -530,11 +651,23 @@ def _dashboard_login_page() -> str:
 <button type="submit">Sign in</button></form></body></html>"""
 
 
-def validate_dashboard_bind(host: str, auth_token: str) -> None:
-    if not is_loopback_host(host) and not auth_token.strip():
+def validate_dashboard_bind(
+    host: str,
+    auth_token: str,
+    auth_tokens_json: str | None = None,
+) -> None:
+    auth_enabled = (
+        bool(auth_token.strip())
+        if auth_tokens_json is None
+        else DashboardAuth.from_config(
+            legacy_token=auth_token,
+            tokens_json=auth_tokens_json,
+        ).enabled
+    )
+    if not is_loopback_host(host) and not auth_enabled:
         raise ValueError(
             "refusing a non-loopback dashboard bind without "
-            "OPENSPACE_DASHBOARD_TOKEN; terminate TLS at a trusted reverse proxy"
+            "configured dashboard credentials; terminate TLS at a trusted reverse proxy"
         )
 
 
@@ -653,6 +786,273 @@ def _dashboard_evidence_allowed_read_roots(
     for item in env_roots.split(os.pathsep):
         _append_root(roots, item)
     return tuple(roots)
+
+
+def _dashboard_observability_roots(
+    explicit_roots: Iterable[str | Path] | None,
+) -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for value in explicit_roots or ():
+        _append_root(roots, value)
+    for item in os.environ.get("OPENSPACE_EVIDENCE_MANIFEST_ROOTS", "").split(os.pathsep):
+        _append_root(roots, item)
+    _append_root(roots, Path.cwd() / ".openspace")
+    _append_root(roots, get_sessions_dir(Path.cwd()))
+    _append_root(roots, PROJECT_ROOT / ".openspace")
+    _append_root(roots, get_sessions_dir(PROJECT_ROOT))
+    for root in WORKFLOW_ROOTS:
+        _append_root(roots, root)
+    return tuple(roots)
+
+
+def _build_observability_snapshot(
+    *,
+    skill_store: SkillStore,
+    workflow_dirs: Iterable[Path],
+    evidence_roots: Iterable[Path],
+    security_audit: DashboardAuditLog,
+) -> dict[str, Any]:
+    return {
+        "evidence": _build_evidence_integrity_snapshot(evidence_roots),
+        "quality": _build_quality_attribution_snapshot(skill_store),
+        "execution_journal": _build_execution_journal_snapshot(),
+        "cost": _build_cost_snapshot(workflow_dirs),
+        "security_audit": security_audit.metrics(),
+    }
+
+
+def _build_evidence_integrity_snapshot(roots: Iterable[Path]) -> dict[str, Any]:
+    from openspace.evidence import load_manifest, verify_manifest
+
+    manifest_paths: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        try:
+            candidates = root.rglob("evidence-manifest-v3.json")
+            for path in candidates:
+                resolved = path.resolve()
+                if resolved not in seen and not path.is_symlink():
+                    seen.add(resolved)
+                    manifest_paths.append(resolved)
+                    if len(manifest_paths) >= 100:
+                        break
+        except OSError:
+            continue
+        if len(manifest_paths) >= 100:
+            break
+    def manifest_mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return -1.0
+
+    manifest_paths.sort(key=manifest_mtime, reverse=True)
+    signing_key_env = os.environ.get(
+        "OPENSPACE_EVIDENCE_SIGNING_KEY_ENV",
+        "OPENSPACE_EVIDENCE_SIGNING_KEY",
+    )
+    signing_key = os.environ.get(signing_key_env)
+    items: list[dict[str, Any]] = []
+    for path in manifest_paths:
+        try:
+            manifest = load_manifest(path)
+            verification = verify_manifest(path, signing_key=signing_key)
+            run = manifest.get("run") if isinstance(manifest.get("run"), dict) else {}
+            items.append(
+                {
+                    "path": str(path),
+                    "manifest_id": manifest.get("manifest_id"),
+                    "created_at": manifest.get("created_at"),
+                    "task_id": run.get("task_id"),
+                    "session_id": run.get("session_id"),
+                    "run_status": run.get("status"),
+                    "status": "verified" if verification["ok"] else "invalid",
+                    "signature_status": verification.get("signature_status"),
+                    "verified_artifacts": verification.get("verified_artifacts", 0),
+                    "errors": verification.get("errors", []),
+                }
+            )
+        except Exception as exc:
+            items.append(
+                {
+                    "path": str(path),
+                    "status": "invalid",
+                    "signature_status": "unknown",
+                    "verified_artifacts": 0,
+                    "errors": [type(exc).__name__],
+                }
+            )
+    return {
+        "schema_version": 3,
+        "total": len(items),
+        "verified": sum(item["status"] == "verified" for item in items),
+        "invalid": sum(item["status"] == "invalid" for item in items),
+        "signed_verified": sum(
+            item.get("signature_status") == "verified" for item in items
+        ),
+        "unsigned": sum(item.get("signature_status") == "absent" for item in items),
+        "scan_limited": len(manifest_paths) >= 100,
+        "recent": items[:10],
+    }
+
+
+def _build_quality_attribution_snapshot(skill_store: SkillStore) -> dict[str, Any]:
+    from datetime import timezone
+
+    from openspace.skill_engine.quality import (
+        FailureDomain,
+        QualityObservation,
+        aggregate_quality,
+        promotion_eligibility,
+    )
+
+    all_observations: list[QualityObservation] = []
+    skills_with_observations = 0
+    promotion_ready = 0
+    for record in skill_store.load_all(active_only=True).values():
+        raw_rows = skill_store.load_trust_observations(record.skill_id, limit=500)
+        observations: list[QualityObservation] = []
+        for row in raw_rows:
+            try:
+                occurred_at = datetime.fromisoformat(str(row.get("created_at") or ""))
+            except ValueError:
+                continue
+            if occurred_at.tzinfo is None:
+                occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+            success = str(row.get("outcome") or "") == "success"
+            observations.append(
+                QualityObservation(
+                    success=success,
+                    occurred_at=occurred_at,
+                    task_id=str(row.get("task_id") or row.get("observation_id") or ""),
+                    session_id=str(row.get("session_id") or ""),
+                    evidence_domain=str(row.get("source") or "execution"),
+                    failure_domain=(FailureDomain.NONE if success else FailureDomain.SKILL),
+                )
+            )
+        if observations:
+            skills_with_observations += 1
+            snapshot = aggregate_quality(observations)
+            if promotion_eligibility(snapshot)["eligible"]:
+                promotion_ready += 1
+            all_observations.extend(observations)
+    aggregate = aggregate_quality(all_observations)
+    return {
+        "schema_version": "skill_quality_v2",
+        "skills_with_observations": skills_with_observations,
+        "promotion_ready": promotion_ready,
+        **aggregate.to_dict(),
+    }
+
+
+def _build_execution_journal_snapshot() -> dict[str, Any]:
+    path = Path(
+        os.environ.get(
+            "OPENSPACE_EXECUTION_JOURNAL_PATH",
+            str(Path.cwd() / ".openspace" / "execution-journal.db"),
+        )
+    ).expanduser().resolve()
+    empty = {
+        "path": str(path),
+        "exists": False,
+        "total": 0,
+        "active": 0,
+        "terminal": 0,
+        "by_state": {},
+    }
+    if not path.is_file() or path.is_symlink():
+        return empty
+    try:
+        with closing(sqlite3.connect(path, timeout=2)) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            rows = connection.execute(
+                "SELECT state, COUNT(*) FROM runtime_executions GROUP BY state"
+            ).fetchall()
+    except (OSError, sqlite3.Error):
+        return {**empty, "exists": True, "error": "journal_unreadable"}
+    by_state = {str(state): int(count) for state, count in rows}
+    active_states = {"accepted", "running", "finalizing"}
+    terminal_states = {"completed", "failed", "cancelled", "interrupted"}
+    return {
+        "path": str(path),
+        "exists": True,
+        "total": sum(by_state.values()),
+        "active": sum(by_state.get(state, 0) for state in active_states),
+        "terminal": sum(by_state.get(state, 0) for state in terminal_states),
+        "by_state": by_state,
+    }
+
+
+def _build_cost_snapshot(workflow_dirs: Iterable[Path]) -> dict[str, Any]:
+    values: list[float] = []
+    inspected = 0
+    for workflow_dir in workflow_dirs:
+        if inspected >= 200:
+            break
+        inspected += 1
+        session = load_recording_session(str(workflow_dir))
+        metadata = session.get("metadata") if isinstance(session, dict) else {}
+        cost = metadata.get("cost") if isinstance(metadata, dict) else None
+        value = _extract_cost_usd(cost)
+        if value is not None:
+            values.append(value)
+    resource_cost = _nu_resource_cost_usd()
+    return {
+        "currency": "USD",
+        "workflow_total_usd": round(sum(values), 6),
+        "resource_total_usd": round(resource_cost, 6),
+        "total_usd": round(sum(values) + resource_cost, 6),
+        "sessions_with_cost": len(values),
+        "sessions_inspected": inspected,
+        "average_session_usd": round(sum(values) / len(values), 6) if values else 0.0,
+    }
+
+
+def _extract_cost_usd(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        parsed = float(value)
+        return max(0.0, parsed) if math.isfinite(parsed) else None
+    if not isinstance(value, dict):
+        return None
+    for key in ("total_cost_usd", "cost_usd", "total_cost", "total", "cost"):
+        raw = value.get(key)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            parsed = float(raw)
+            return max(0.0, parsed) if math.isfinite(parsed) else None
+    return None
+
+
+def _nu_resource_cost_usd() -> float:
+    path = Path(
+        os.environ.get(
+            "OPENSPACE_NU_RESOURCE_EXECUTION_LEDGER_PATH",
+            str(Path.cwd() / ".openspace" / "nu-resource-execution.db"),
+        )
+    ).expanduser().resolve()
+    if not path.is_file() or path.is_symlink():
+        return 0.0
+    total = 0.0
+    try:
+        with closing(sqlite3.connect(path, timeout=2)) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            rows = connection.execute(
+                "SELECT result_json FROM nu_resource_approval_uses "
+                "WHERE status LIKE 'completed%'"
+            ).fetchall()
+        for (raw,) in rows:
+            payload = json.loads(raw or "{}")
+            result = payload.get("result") if isinstance(payload, dict) else {}
+            if isinstance(result, dict) and result.get("cost_unit") == "usd":
+                cost = result.get("cost")
+                if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                    parsed = float(cost)
+                    if math.isfinite(parsed):
+                        total += max(0.0, parsed)
+    except (OSError, sqlite3.Error, json.JSONDecodeError):
+        return 0.0
+    return total
 
 
 def _append_root(roots: list[Path], root: str | Path | None) -> None:
@@ -2091,8 +2491,9 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode")
     args = parser.parse_args()
     auth_token = os.environ.get("OPENSPACE_DASHBOARD_TOKEN", "")
+    auth_tokens_json = os.environ.get("OPENSPACE_DASHBOARD_TOKENS_JSON", "")
     try:
-        validate_dashboard_bind(args.host, auth_token)
+        validate_dashboard_bind(args.host, auth_token, auth_tokens_json)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -2101,6 +2502,7 @@ def main() -> None:
         evidence_db_path=args.evidence_db_path,
         evolution_storage_root=args.evolution_storage_root,
         auth_token=auth_token,
+        auth_tokens_json=auth_tokens_json,
     )
 
     from werkzeug.serving import run_simple

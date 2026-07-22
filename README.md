@@ -372,7 +372,14 @@ When present, OpenSpace automatically registers four deferred meta tools:
 `nu_resource_preflight`. They provide deterministic routing diagnostics,
 free-first candidate discovery, credential/local availability, and policy dry
 runs. No tool exposes live asset or model generation, so paid/remote execution
-remains an explicit operator action.
+remains an explicit operator action. A fifth tool, `nu_resource_execute`, is
+registered only when `OPENSPACE_NU_RESOURCE_EXECUTION_TOOL_ENABLED=true`. It is
+still dry-run by default. Live execution additionally requires the live feature
+flag, an operator capability token, a request-bound signed approval, an
+unexpired candidate/remote scope, a matching cost ceiling, and an unused entry
+in the durable approval ledger. Create approvals with
+`openspace-nu-approval`; see [`openspace/.env.example`](openspace/.env.example)
+for every guard.
 
 **② Copy skills** into your agent's skills directory:
 
@@ -439,6 +446,27 @@ openspace-download-skill <skill_id>         # download a skill from the cloud
 openspace-upload-skill --skill-dir /path/to/skill/dir  # upload a trusted skill
 ```
 
+**Verifiable packages and runs** — add an exact file inventory, compatibility,
+permissions, provenance, SBOM, and optional HMAC authentication to a skill, or
+verify/replay a run manifest:
+
+```bash
+export OPENSPACE_SKILL_PACKAGE_SIGNING_KEY='replace-with-a-managed-secret'
+openspace-skill-package build .openspace/skills/my-skill --license MIT
+openspace-skill-package verify .openspace/skills/my-skill --require-signature
+openspace-skill-package pack .openspace/skills/my-skill my-skill.zip --require-signature
+
+export OPENSPACE_EVIDENCE_SIGNING_KEY='replace-with-a-managed-secret'
+openspace-evidence verify /path/to/session/evidence-manifest-v3.json --require-signature
+openspace-evidence replay /path/to/session/evidence-manifest-v3.json  # dry-run
+```
+
+Live evidence replay is disabled unless `--execute`,
+`OPENSPACE_EVIDENCE_REPLAY_ENABLED=1`, and a valid manifest signature/key are
+all present. Runtime sessions create an Evidence Plane v3 manifest automatically
+and use a SQLite execution journal for idempotency, lease recovery, and
+terminal-result replay.
+
 ### 📊 Local Dashboard
 
 See how your skills evolve — browse skills, track lineage, compare diffs.
@@ -460,6 +488,14 @@ non-loopback address, set a long random `OPENSPACE_DASHBOARD_TOKEN` and terminat
 TLS at a trusted reverse proxy. The server refuses an unauthenticated remote
 bind; browser users sign in at `/auth` and API clients use
 `Authorization: Bearer <token>`.
+
+For teams, `OPENSPACE_DASHBOARD_TOKENS_JSON` maps independent tokens to
+`viewer`, `operator`, or `admin` identities. Read APIs require viewer access;
+mutations require operator access. Authentication denials and mutation attempts
+are written to the local dashboard audit database without storing raw
+tokens or client addresses. The overview exposes Evidence v3 integrity,
+Quality Attribution v2 confidence, durable execution state, and accounted LLM
+and governed-resource cost.
 
 📖 **Frontend setup guide**: [`apps/dashboard/README.md`](apps/dashboard/README.md)
 

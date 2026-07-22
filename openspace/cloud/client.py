@@ -864,6 +864,21 @@ class OpenSpaceClient:
         skill_file = skill_path / SKILL_FILENAME
         if not skill_file.exists():
             raise CloudError(f"SKILL.md not found in {skill_dir}")
+        try:
+            from openspace.skill_package import enforce_skill_package_policy
+
+            enforce_skill_package_policy(skill_path)
+        except Exception as exc:
+            from openspace.skill_package import SkillPackageError
+
+            if isinstance(exc, SkillPackageError):
+                raise CloudError(
+                    str(exc),
+                    code="SKILL_PACKAGE_VERIFICATION_FAILED",
+                    kind="validation",
+                    retryable=False,
+                ) from exc
+            raise
 
         content = skill_file.read_text(encoding="utf-8")
         fm = parse_frontmatter(content)
@@ -1080,6 +1095,21 @@ class OpenSpaceClient:
             skill_root = self._find_extracted_skill_root(staging_dir)
             if skill_root is None:
                 raise CloudError("Downloaded skill bundle does not contain SKILL.md")
+            try:
+                from openspace.skill_package import enforce_skill_package_policy
+
+                enforce_skill_package_policy(skill_root)
+            except Exception as exc:
+                from openspace.skill_package import SkillPackageError
+
+                if isinstance(exc, SkillPackageError):
+                    raise CloudError(
+                        str(exc),
+                        code="SKILL_PACKAGE_VERIFICATION_FAILED",
+                        kind="validation",
+                        retryable=False,
+                    ) from exc
+                raise
             self._copy_extracted_skill_tree(skill_root, skill_dir)
 
         write_local_skill_id(skill_dir, local_skill_id)
@@ -1523,11 +1553,17 @@ class OpenSpaceClient:
     @staticmethod
     def _collect_files(skill_dir: Path) -> List[Path]:
         """Collect all files in skill directory (skip .skill_id sidecar)."""
-        return [
-            p for p in sorted(skill_dir.rglob("*"))
-            if p.is_file()
-            and p.name not in {SKILL_ID_FILENAME, CLOUD_SKILL_INFO_FILENAME, UPLOAD_META_FILENAME}
-        ]
+        files: list[Path] = []
+        for path in sorted(skill_dir.rglob("*")):
+            if path.is_symlink():
+                raise CloudError(f"Skill upload refuses symlinked paths: {path}")
+            if path.is_file() and path.name not in {
+                SKILL_ID_FILENAME,
+                CLOUD_SKILL_INFO_FILENAME,
+                UPLOAD_META_FILENAME,
+            }:
+                files.append(path)
+        return files
 
     @staticmethod
     def _collect_text_files(skill_dir: Path) -> Dict[str, str]:

@@ -1,6 +1,12 @@
 """Runtime-level contracts for OpenSpace orchestration."""
 
 from .app import OpenSpaceRuntime, OpenSpaceRuntimeState
+from .execution_journal import (
+    ExecutionAlreadyRunning,
+    ExecutionJournal,
+    ExecutionJournalError,
+    JournalStart,
+)
 from .event_bus import RuntimeEventBus
 from .execution_request import ExecutionRequest, ExecutionResult
 from .session_runtime import SessionRuntime
@@ -12,6 +18,10 @@ __all__ = [
     "ExecutionResult",
     "OpenSpaceRuntime",
     "OpenSpaceRuntimeState",
+    "ExecutionAlreadyRunning",
+    "ExecutionJournal",
+    "ExecutionJournalError",
+    "JournalStart",
     "RuntimeEventBus",
     "SessionRuntime",
     "TurnRunner",

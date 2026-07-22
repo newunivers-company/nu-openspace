@@ -1,4 +1,4 @@
-"""Optional, read-only NewUnivers routing and resource-generation adapters."""
+"""Optional NewUnivers routing, preflight, and governed execution adapters."""
 
 from .adapter import (
     llm_route_diagnostics,
@@ -7,6 +7,13 @@ from .adapter import (
     resource_health,
     resource_preflight,
 )
+from .governance import (
+    NuExecutionLedger,
+    NuGovernanceError,
+    create_resource_approval,
+    governed_resource_execute,
+    verify_resource_approval,
+)
 
 __all__ = [
     "llm_route_diagnostics",
@@ -14,4 +21,9 @@ __all__ = [
     "resource_candidates",
     "resource_health",
     "resource_preflight",
+    "NuExecutionLedger",
+    "NuGovernanceError",
+    "create_resource_approval",
+    "governed_resource_execute",
+    "verify_resource_approval",
 ]

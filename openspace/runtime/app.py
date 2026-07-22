@@ -154,6 +154,7 @@ class OpenSpaceRuntimeState:
     session_storage: SessionStorage | None = None
     file_history: FileHistory | None = None
     scheduler: Any | None = None
+    execution_journal: Any | None = None
     current_session_id: str | None = None
     current_session_metadata: dict[str, Any] | None = None
     memory_cleanup_context: dict[str, Any] | None = None
@@ -614,6 +615,8 @@ class OpenSpaceRuntime:
                         ),
                         pythonpath_roots=(_runtime_source_root(),),
                     )
+                    from openspace.skill_engine.evolution import ReplaySafetyPolicy
+
                     self.state.behavior_evaluator = SkillBehaviorEvaluator(
                         evidence_store=self.state.evidence_store,
                         llm_client=self.state.llm_client,
@@ -632,6 +635,38 @@ class OpenSpaceRuntime:
                             config,
                             "evolution_behavior_eval_require_replay_runner",
                             True,
+                        ),
+                        replay_safety_policy=ReplaySafetyPolicy(
+                            min_executable_tasks=getattr(
+                                config,
+                                "evolution_replay_min_executable_tasks",
+                                1,
+                            ),
+                            max_cost_regression_ratio=getattr(
+                                config,
+                                "evolution_replay_max_cost_regression_ratio",
+                                0.10,
+                            ),
+                            min_score_gain_for_cost_regression=getattr(
+                                config,
+                                "evolution_replay_min_score_gain_for_cost_regression",
+                                0.02,
+                            ),
+                            require_cost_metrics=getattr(
+                                config,
+                                "evolution_replay_require_cost_metrics",
+                                False,
+                            ),
+                            require_canary=getattr(
+                                config,
+                                "evolution_canary_required",
+                                False,
+                            ),
+                            min_canary_samples=getattr(
+                                config,
+                                "evolution_canary_min_samples",
+                                1,
+                            ),
                         ),
                     )
                     self.state.evidence_runtime_adapter = RuntimeEvidenceAdapter(
@@ -1124,6 +1159,14 @@ class OpenSpaceRuntime:
                     logger.debug("Evidence store closed")
                 except Exception as exc:
                     logger.debug("Failed to close evidence store: %s", exc)
+
+            if self.state.execution_journal:
+                try:
+                    self.state.execution_journal.close()
+                    self.state.execution_journal = None
+                    logger.debug("Execution journal closed")
+                except Exception as exc:
+                    logger.debug("Failed to close execution journal: %s", exc)
 
             self.mark_uninitialized()
 
