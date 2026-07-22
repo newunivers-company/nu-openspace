@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -11,7 +13,16 @@ from typing import Any, Dict, Iterable, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-from flask import Flask, abort, jsonify, request, send_from_directory, url_for
+from flask import (
+    Flask,
+    Response,
+    abort,
+    jsonify,
+    redirect,
+    request,
+    send_from_directory,
+    url_for,
+)
 
 from openspace.recording.action_recorder import analyze_agent_actions, load_agent_actions
 from openspace.recording.utils import load_recording_session
@@ -27,8 +38,10 @@ from openspace.skill_engine.evolution import (
 )
 from openspace.skill_engine.triggers import TriggerStore
 from openspace.skill_engine.types import SkillRecord
+from openspace.utils.network import is_loopback_host
 
 API_PREFIX = "/api/v1"
+_AUTH_COOKIE = "openspace_dashboard_session"
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIST_DIR = PROJECT_ROOT / "apps" / "dashboard" / "dist"
 PACKAGED_DASHBOARD_STATIC_DIR = PACKAGE_ROOT / "packaged" / "dashboard"
@@ -80,8 +93,15 @@ def create_app(
     evidence_store: EvidenceStore | None = None,
     evidence_db_path: str | Path | None = None,
     evolution_storage_root: str | Path | None = None,
+    auth_token: str | None = None,
 ) -> Flask:
     app = Flask(__name__, static_folder=None)
+    resolved_auth_token = (
+        os.environ.get("OPENSPACE_DASHBOARD_TOKEN", "")
+        if auth_token is None
+        else auth_token
+    ).strip()
+    expected_cookie = _dashboard_auth_cookie_value(resolved_auth_token)
     resolved_skill_db_path = _resolve_skill_store_db_path(
         db_path=db_path,
         evolution_storage_root=evolution_storage_root,
@@ -107,6 +127,73 @@ def create_app(
         audit_evidence_store,
         skill_store,
     )
+    app.extensions["openspace_dashboard"] = {
+        "skill_store": skill_store,
+        "evidence_store": audit_evidence_store,
+        "auth_enabled": bool(resolved_auth_token),
+    }
+
+    def request_is_authenticated() -> bool:
+        if not resolved_auth_token:
+            return True
+        authorization = request.headers.get("Authorization", "")
+        scheme, _, bearer = authorization.partition(" ")
+        if scheme.lower() == "bearer" and bearer:
+            return hmac.compare_digest(bearer, resolved_auth_token)
+        cookie = request.cookies.get(_AUTH_COOKIE, "")
+        return bool(cookie) and hmac.compare_digest(cookie, expected_cookie)
+
+    @app.before_request
+    def require_dashboard_auth() -> Any:
+        if not resolved_auth_token or request.endpoint == "dashboard_auth":
+            return None
+        if request_is_authenticated():
+            return None
+        if request.path.startswith(API_PREFIX):
+            response = jsonify(
+                {
+                    "status": "error",
+                    "error": "dashboard authentication required",
+                }
+            )
+            response.status_code = 401
+            response.headers["WWW-Authenticate"] = "Bearer"
+            return response
+        return redirect(url_for("dashboard_auth"))
+
+    @app.after_request
+    def add_dashboard_security_headers(response: Response) -> Response:
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if request.endpoint == "dashboard_auth":
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.route("/auth", methods=["GET", "POST"])
+    def dashboard_auth() -> Any:
+        if not resolved_auth_token:
+            return redirect("/")
+        if request.method == "GET":
+            return Response(_dashboard_login_page(), mimetype="text/html")
+        payload = request.get_json(silent=True) if request.is_json else None
+        submitted = (
+            str(payload.get("token", ""))
+            if isinstance(payload, dict)
+            else request.form.get("token", "")
+        )
+        if not submitted or not hmac.compare_digest(submitted, resolved_auth_token):
+            return Response("Invalid dashboard token", status=401, mimetype="text/plain")
+        response = redirect("/")
+        response.set_cookie(
+            _AUTH_COOKIE,
+            expected_cookie,
+            httponly=True,
+            secure=request.is_secure,
+            samesite="Strict",
+            path="/",
+        )
+        return response
 
     def get_store() -> SkillStore:
         return skill_store
@@ -427,6 +514,28 @@ def create_app(
         )
 
     return app
+
+
+def _dashboard_auth_cookie_value(token: str) -> str:
+    return hashlib.sha256(f"openspace-dashboard:{token}".encode("utf-8")).hexdigest()
+
+
+def _dashboard_login_page() -> str:
+    return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenSpace Dashboard Login</title></head>
+<body style="font-family:system-ui;max-width:28rem;margin:10vh auto;padding:2rem">
+<h1>OpenSpace Dashboard</h1><p>Enter OPENSPACE_DASHBOARD_TOKEN.</p>
+<form method="post" autocomplete="off"><label>Token <input name="token" type="password" required autofocus></label>
+<button type="submit">Sign in</button></form></body></html>"""
+
+
+def validate_dashboard_bind(host: str, auth_token: str) -> None:
+    if not is_loopback_host(host) and not auth_token.strip():
+        raise ValueError(
+            "refusing a non-loopback dashboard bind without "
+            "OPENSPACE_DASHBOARD_TOKEN; terminate TLS at a trusted reverse proxy"
+        )
 
 
 def dashboard_static_dir_candidates() -> List[Path]:
@@ -1962,7 +2071,11 @@ def _build_workflow_artifacts(workflow_dir: Path, workflow_id: str, metadata: Di
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenSpace dashboard API server")
-    parser.add_argument("--host", default="127.0.0.1", help="Dashboard API host")
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("OPENSPACE_DASHBOARD_HOST", "127.0.0.1"),
+        help="Dashboard API host",
+    )
     parser.add_argument("--port", type=int, default=7788, help="Dashboard API port")
     parser.add_argument("--db-path", default=None, help="Dashboard skill store path")
     parser.add_argument(
@@ -1977,11 +2090,17 @@ def main() -> None:
     )
     parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode")
     args = parser.parse_args()
+    auth_token = os.environ.get("OPENSPACE_DASHBOARD_TOKEN", "")
+    try:
+        validate_dashboard_bind(args.host, auth_token)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     app = create_app(
         db_path=args.db_path,
         evidence_db_path=args.evidence_db_path,
         evolution_storage_root=args.evolution_storage_root,
+        auth_token=auth_token,
     )
 
     from werkzeug.serving import run_simple

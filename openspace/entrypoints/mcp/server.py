@@ -28,6 +28,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
+from openspace.utils.network import is_loopback_host
+
 
 class _MCPSafeStdout:
     """Stdout wrapper: binary (.buffer) → real stdout, text (.write) → stderr."""
@@ -175,7 +177,8 @@ async def _get_openspace():
 
         env_model = os.environ.get("OPENSPACE_MODEL", "")
         workspace = os.environ.get("OPENSPACE_WORKSPACE")
-        max_iter = int(os.environ.get("OPENSPACE_MAX_ITERATIONS", "20"))
+        max_iter_raw = os.environ.get("OPENSPACE_MAX_ITERATIONS", "").strip()
+        max_iter = int(max_iter_raw) if max_iter_raw else None
         enable_rec = os.environ.get("OPENSPACE_ENABLE_RECORDING", "true").lower() in ("true", "1", "yes")
 
         backend_scope_raw = os.environ.get("OPENSPACE_BACKEND_SCOPE")
@@ -2699,6 +2702,18 @@ async def upload_skill(
         logger.error(f"upload_skill failed: {e}", exc_info=True)
         return _json_error(e, status="error")
 
+def validate_mcp_http_bind(host: str, transport: str) -> None:
+    """Keep unauthenticated FastMCP HTTP transports behind loopback."""
+
+    if transport not in {"sse", "streamable-http"}:
+        return
+    if not is_loopback_host(host):
+        raise ValueError(
+            f"refusing {transport} on non-loopback host {host!r}; bind to "
+            "127.0.0.1/::1 and use an authenticated reverse proxy or SSH tunnel"
+        )
+
+
 def run_mcp_server() -> None:
     """Console-script entry point for ``openspace-mcp``."""
     import argparse
@@ -2760,6 +2775,11 @@ def run_mcp_server() -> None:
     args = parser.parse_args(argv)
 
     transport = _resolve_transport(args.transport, argv)
+    if transport != "stdio":
+        try:
+            validate_mcp_http_bind(args.host, transport)
+        except ValueError as exc:
+            parser.error(str(exc))
     port = args.port
     if port is None:
         port = _parse_port_from_env(_default_port_for_transport(transport))

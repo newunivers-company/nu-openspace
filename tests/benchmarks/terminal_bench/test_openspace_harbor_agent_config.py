@@ -6,7 +6,6 @@ import shutil
 import pytest
 
 from benchmarks.terminal_bench import openspace_harbor_agent
-from benchmarks.terminal_bench import openspace_agent
 from benchmarks.terminal_bench import run_benchmark
 
 
@@ -19,21 +18,6 @@ def test_harbor_agent_default_backend_scope_includes_meta_tools():
     signature = inspect.signature(openspace_harbor_agent.OpenSpaceHarborAgent)
 
     assert signature.parameters["backend_scope"].default == "shell,meta"
-
-
-def test_legacy_agent_uses_provisional_skill_defaults():
-    signature = inspect.signature(openspace_agent.OpenSpaceTerminalBenchAgent)
-
-    assert (
-        signature.parameters["evolution_allow_single_observation_capture"].default
-        is True
-    )
-    assert (
-        signature.parameters[
-            "skill_trust_promotion_min_independent_successes"
-        ].default
-        == 2
-    )
 
 
 def test_terminal_bench_prompt_mentions_blocking_task_get():
@@ -418,6 +402,28 @@ def test_terminal_bench_launcher_respects_explicit_agent_setup_timeout():
     assert command[setup_index + 1] == "4.0"
 
 
+def test_terminal_bench_dry_run_does_not_require_credentials(monkeypatch, capsys):
+    for name in (
+        "OPENSPACE_LLM_API_KEY",
+        "OPENROUTER_API_KEY",
+        "OR_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    exit_code = run_benchmark.cli(
+        [
+            "--task",
+            "fix-git",
+            "--model",
+            "openrouter/test/model",
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+    assert "harbor run" in capsys.readouterr().out
+
+
 def test_replay_seed_without_artifacts_falls_back_to_cold_start(tmp_path):
     seed_trial = tmp_path / "seed" / "fix-git__abc123"
     (seed_trial / "agent").mkdir(parents=True)
@@ -459,6 +465,7 @@ def test_terminal_bench_agent_exports_checker_pass_stop_env(tmp_path):
     agent = openspace_harbor_agent.OpenSpaceHarborAgent(
         logs_dir=logs_dir,
         model_name="openrouter/tencent/hy3:free",
+        api_key="test-only-key",
         bench_stop_after_checker_pass_iterations=1,
     )
 

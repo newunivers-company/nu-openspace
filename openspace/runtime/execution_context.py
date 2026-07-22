@@ -241,7 +241,8 @@ class ExecutionContextManager:
     def resolve_max_iterations(self, request_max: int | None) -> int:
         if request_max is not None:
             return max(1, int(request_max))
-        return int(self.config.grounding_max_iterations)
+        configured = self.config.grounding_max_iterations
+        return max(1, int(configured if configured is not None else 20))
 
     def apply_final_permission_mode(
         self,

@@ -139,7 +139,10 @@ class OpenSpaceConfig:
     
     # Grounding Configuration
     grounding_config_path: Optional[str] = None
-    grounding_max_iterations: int = 20
+    # ``None`` means "inherit GroundingAgent.max_iterations from
+    # config_agents.json".  Keeping an explicit value distinct fixes the old
+    # ambiguity where an intentional value of 20 was treated as unset.
+    grounding_max_iterations: Optional[int] = None
     grounding_system_prompt: Optional[str] = None
     
     # Backend Configuration

@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+      - name: Install locked Python dependencies
+        run: uv sync --locked --extra dev --extra semantic-search --extra benchmark
+      - name: Compile Python sources
+        run: uv run python -m compileall -q openspace benchmarks tests
+      - name: Check undefined Python names
+        run: uv run ruff check openspace tests benchmarks --select F821,F822,F823
+      - name: Lint new integration and safety modules
+        run: >-
+          uv run ruff check
+          openspace/integrations/newunivers
+          openspace/grounding/core/meta/newunivers_tools.py
+          openspace/utils/safe_json_cache.py
+          openspace/utils/network.py
+          benchmarks/terminal_bench/result_manifest.py
+      - name: Enforce complexity regression budget
+        run: uv run python scripts/check_complexity.py
+      - name: Run Python test suite
+        run: uv run pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            apps/dashboard/package-lock.json
+            apps/tui/package-lock.json
+      - name: Install dashboard dependencies
+        working-directory: apps/dashboard
+        run: npm ci
+      - name: Audit, test, and build dashboard
+        working-directory: apps/dashboard
+        run: |
+          npm audit --audit-level=low
+          npm test
+          npm run build
+      - name: Install TUI dependencies
+        working-directory: apps/tui
+        run: npm ci
+      - name: Audit, build, and test TUI
+        working-directory: apps/tui
+        run: |
+          npm audit --audit-level=low
+          npm run build
+          npm test
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v8
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Build packaged dashboard
+        working-directory: apps/dashboard
+        run: |
+          npm ci
+          npm run build:packaged
+      - name: Build packaged TUI
+        working-directory: apps/tui
+        run: |
+          npm ci
+          npm run build:packaged
+      - name: Build Python distributions
+        run: uv build
+      - name: Install and inspect wheel
+        run: |
+          uv venv .wheel-smoke
+          uv pip install --python .wheel-smoke/bin/python dist/*.whl
+          .wheel-smoke/bin/python -c "from pathlib import Path; import openspace; root=Path(openspace.__file__).parent; assert (root/'packaged/dashboard/index.html').is_file(); assert (root/'packaged/tui/index.js').is_file()"

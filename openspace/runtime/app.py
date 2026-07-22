@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +27,30 @@ logger = Logger.get_logger(__name__)
 _CLEANUP_MEMORY_DRAIN_TIMEOUT_S = 10.0
 _QUALITY_SIGNAL_CUTOVER_CHECKPOINT = "quality_signal_cutover:last_watermark"
 _GENERAL_EVOLUTION_TRIGGER_TYPES = ("ANALYSIS", "MANUAL", "QUALITY_SIGNAL")
+_FALLBACK_GROUNDING_MAX_ITERATIONS = 20
+
+
+def resolve_grounding_max_iterations(
+    requested: int | None,
+    agent_config: Mapping[str, Any] | None,
+) -> int:
+    """Resolve explicit runtime input before the agent-config default."""
+
+    configured = (
+        agent_config.get("max_iterations", _FALLBACK_GROUNDING_MAX_ITERATIONS)
+        if agent_config
+        else _FALLBACK_GROUNDING_MAX_ITERATIONS
+    )
+    value = requested if requested is not None else configured
+    if isinstance(value, bool):
+        raise ValueError("grounding_max_iterations must be a positive integer")
+    try:
+        resolved = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("grounding_max_iterations must be a positive integer") from exc
+    if resolved < 1:
+        raise ValueError("grounding_max_iterations must be a positive integer")
+    return resolved
 
 
 def _default_evolution_replay_command(*, docker_image: str | None = None) -> list[str]:
@@ -427,27 +451,22 @@ class OpenSpaceRuntime:
                 )
 
             agent_config = get_agent_config("GroundingAgent")
-            cli_max_iter = config.grounding_max_iterations
-            default_max_iter = type(config)().grounding_max_iterations
+            max_iterations = resolve_grounding_max_iterations(
+                config.grounding_max_iterations,
+                agent_config,
+            )
             if agent_config:
-                cfg_max_iter = agent_config.get("max_iterations", default_max_iter)
-                if cli_max_iter != default_max_iter:
-                    max_iterations = cli_max_iter
-                else:
-                    max_iterations = cfg_max_iter
                 backend_scope = (
                     config.backend_scope
                     or agent_config.get("backend_scope")
                     or ["gui", "shell", "mcp", "web", "meta"]
                 )
-                config.grounding_max_iterations = max_iterations
                 logger.info(
                     "Loaded GroundingAgent config from config_agents.json "
                     "(max_iterations=%s)",
                     max_iterations,
                 )
             else:
-                max_iterations = config.grounding_max_iterations
                 backend_scope = (
                     config.backend_scope or ["gui", "shell", "mcp", "web", "meta"]
                 )
@@ -456,6 +475,7 @@ class OpenSpaceRuntime:
                     "(max_iterations=%s)",
                     max_iterations,
                 )
+            config.grounding_max_iterations = max_iterations
 
             if grounding_config.enabled_backends:
                 scope_set = set(backend_scope)

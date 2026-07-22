@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/newunivers-company/nu-openspace/terminal-bench-result.schema.json",
+  "title": "OpenSpace Terminal-Bench result manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "status",
+    "reproducible",
+    "benchmark",
+    "dataset",
+    "model",
+    "cold",
+    "warm",
+    "required_artifacts",
+    "missing_artifacts"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {
+      "enum": ["complete", "historical_claim_artifacts_missing"]
+    },
+    "reproducible": {"type": "boolean"},
+    "benchmark": {"const": "terminal-bench"},
+    "dataset": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1},
+    "command": {"type": ["string", "null"]},
+    "generated_at": {"type": ["string", "null"]},
+    "source": {"type": ["object", "null"]},
+    "cold": {"$ref": "#/$defs/run"},
+    "warm": {"$ref": "#/$defs/run"},
+    "required_artifacts": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "missing_artifacts": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "run": {
+      "type": "object",
+      "required": ["pass_rate"],
+      "properties": {
+        "run_dir": {"type": "string"},
+        "task_count": {"type": ["integer", "null"], "minimum": 0},
+        "scored_count": {"type": ["integer", "null"], "minimum": 0},
+        "passed_count": {"type": ["integer", "null"], "minimum": 0},
+        "pass_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "result_json_tree_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "tasks": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    }
+  }
+}

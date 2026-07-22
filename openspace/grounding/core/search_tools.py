@@ -7,7 +7,7 @@ import httpx
 from typing import Iterable, List, Tuple, Dict, Optional, Any, TYPE_CHECKING
 from enum import Enum
 import json
-import pickle
+import math
 from pathlib import Path
 from datetime import datetime
 
@@ -15,6 +15,7 @@ from .tool import BaseTool
 from .types import BackendType
 from .tool_discovery import rank_tools_by_keyword
 from openspace.utils.logging import Logger
+from openspace.utils.safe_json_cache import atomic_write_json, load_json_object
 from openspace.config.constants import PROJECT_ROOT
 
 if TYPE_CHECKING:
@@ -46,7 +47,7 @@ class ToolRanker:
     ToolRanker: rank tools by keyword, semantic or hybrid
     """
     # Cache version for persistent storage - increment when cache format changes
-    CACHE_VERSION = 1
+    CACHE_VERSION = 2
     
     def __init__(
         self, 
@@ -99,7 +100,7 @@ class ToolRanker:
         )
         
         # Structured in-memory cache
-        # Structure: {backend: {server: {tool_name: {"embedding": np.ndarray, "description": str, "cached_at": str}}}}
+        # Structure: {backend: {server: {tool_name: {"embedding": list[float], "description": str, "cached_at": str}}}}
         self._structured_cache: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
         
         # For backward compatibility and quick lookup: {text -> (backend, server, tool_name)}
@@ -128,7 +129,46 @@ class ToolRanker:
         """Get the cache file path for the current model."""
         # Use model name in filename to support multiple models
         safe_model_name = self._model_name.replace("/", "_").replace("\\", "_")
-        return self._cache_dir / f"embeddings_{safe_model_name}_v{self.CACHE_VERSION}.pkl"
+        return self._cache_dir / f"embeddings_{safe_model_name}_v{self.CACHE_VERSION}.json"
+
+    @staticmethod
+    def _validate_embeddings(value: Any) -> Dict[str, Dict[str, Dict[str, Dict[str, Any]]]]:
+        if not isinstance(value, dict):
+            raise ValueError("embeddings must be an object")
+        validated: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+        for backend, servers in value.items():
+            if not isinstance(backend, str) or not isinstance(servers, dict):
+                raise ValueError("invalid embedding backend entry")
+            validated_servers: Dict[str, Dict[str, Dict[str, Any]]] = {}
+            for server, tools in servers.items():
+                if not isinstance(server, str) or not isinstance(tools, dict):
+                    raise ValueError("invalid embedding server entry")
+                validated_tools: Dict[str, Dict[str, Any]] = {}
+                for tool_name, tool_data in tools.items():
+                    if not isinstance(tool_name, str) or not isinstance(tool_data, dict):
+                        raise ValueError("invalid embedding tool entry")
+                    embedding = tool_data.get("embedding")
+                    if not isinstance(embedding, list) or not embedding:
+                        raise ValueError("embedding must be a non-empty array")
+                    if any(
+                        isinstance(item, bool)
+                        or not isinstance(item, (int, float))
+                        or not math.isfinite(float(item))
+                        for item in embedding
+                    ):
+                        raise ValueError("embedding contains a non-finite number")
+                    description = tool_data.get("description", "")
+                    cached_at = tool_data.get("cached_at", "")
+                    if not isinstance(description, str) or not isinstance(cached_at, str):
+                        raise ValueError("embedding metadata must be text")
+                    validated_tools[tool_name] = {
+                        "embedding": [float(item) for item in embedding],
+                        "description": description,
+                        "cached_at": cached_at,
+                    }
+                validated_servers[server] = validated_tools
+            validated[backend] = validated_servers
+        return validated
     
     def _load_persistent_cache(self) -> None:
         """Load embeddings from disk cache."""
@@ -139,12 +179,11 @@ class ToolRanker:
             return
         
         try:
-            with open(cache_file, 'rb') as f:
-                data = pickle.load(f)
-            
+            data = load_json_object(cache_file)
+
             # Validate cache version
             if isinstance(data, dict) and data.get("version") == self.CACHE_VERSION:
-                self._structured_cache = data.get("embeddings", {})
+                self._structured_cache = self._validate_embeddings(data.get("embeddings", {}))
                 self._rebuild_text_index()
                 
                 # Count total embeddings
@@ -190,9 +229,7 @@ class ToolRanker:
                 "embeddings": self._structured_cache
             }
             
-            # Save cache
-            with open(cache_file, 'wb') as f:
-                pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            atomic_write_json(cache_file, cache_data)
             
             # Count total embeddings
             total = sum(
@@ -278,7 +315,7 @@ class ToolRanker:
     def _init_remote_embedding(self) -> bool:
         """Initialize remote embedding API (OpenRouter/OpenAI compatible)."""
         try:
-            def embed_texts(texts: List[str]) -> List[np.ndarray]:
+            def embed_texts(texts: List[str]) -> List[Any]:
                 with httpx.Client(timeout=60.0) as client:
                     response = client.post(
                         f"{self._api_base_url}/embeddings",
@@ -321,7 +358,7 @@ class ToolRanker:
             logger.error(f"Embedding model '{self._model_name}' loading failed: {exc}")
             return False
 
-    def _get_embedding(self, tool: BaseTool) -> Optional[np.ndarray]:
+    def _get_embedding(self, tool: BaseTool) -> Optional[List[float]]:
         """Get embedding from structured cache."""
         backend, server, tool_name = self._get_cache_key(tool)
         
@@ -334,7 +371,7 @@ class ToolRanker:
         
         return self._structured_cache[backend][server][tool_name].get("embedding")
     
-    def _set_embedding(self, tool: BaseTool, embedding: np.ndarray) -> None:
+    def _set_embedding(self, tool: BaseTool, embedding: Any) -> None:
         """Store embedding in structured cache."""
         backend, server, tool_name = self._get_cache_key(tool)
         
@@ -345,8 +382,11 @@ class ToolRanker:
             self._structured_cache[backend][server] = {}
         
         # Store embedding with metadata
+        vector = _np().asarray(embedding, dtype=float).tolist()
+        if not vector or not all(math.isfinite(float(item)) for item in vector):
+            raise ValueError("embedding must contain finite numbers")
         self._structured_cache[backend][server][tool_name] = {
-            "embedding": embedding,
+            "embedding": vector,
             "description": tool.description or "",
             "cached_at": datetime.now().isoformat()
         }

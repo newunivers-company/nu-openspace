@@ -435,7 +435,7 @@ def cli(argv: list[str] | None = None) -> int:
         return 0
 
     credential_error = _missing_credentials_message(args.model)
-    if credential_error:
+    if credential_error and not args.dry_run:
         print(credential_error, file=sys.stderr)
         return 2
 

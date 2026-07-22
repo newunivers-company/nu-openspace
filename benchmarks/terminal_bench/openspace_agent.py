@@ -332,7 +332,7 @@ class OpenSpaceTerminalBenchAgent(BaseAgent):
         )
 
     def _install_openspace(self, session: TmuxSession) -> bool:
-        install_script = f"""
+        install_script = """
 set -e
 source /installed-agent/openspace-env.sh
 cd /installed-agent/openspace-src
@@ -393,7 +393,7 @@ python3 -m pip install --break-system-packages -e . || python3 -m pip install -e
             task_file_path.unlink(missing_ok=True)
             config_file_path.unlink(missing_ok=True)
 
-        run_script = f"""
+        run_script = """
 set -e
 source /installed-agent/openspace-env.sh
 cd "$OPENSPACE_WORKSPACE"

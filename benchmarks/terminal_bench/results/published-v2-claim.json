@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "status": "historical_claim_artifacts_missing",
+  "reproducible": false,
+  "benchmark": "terminal-bench",
+  "dataset": "terminal-bench@2.1 (reported; exact dataset revision unavailable)",
+  "model": "Hy3 (reported; exact provider/model identifier unavailable)",
+  "command": null,
+  "generated_at": null,
+  "source": null,
+  "cold": {
+    "task_count": 89,
+    "scored_count": null,
+    "passed_count": null,
+    "pass_rate": 0.652,
+    "result_json_tree_sha256": null,
+    "tasks": []
+  },
+  "warm": {
+    "task_count": 89,
+    "scored_count": null,
+    "passed_count": null,
+    "pass_rate": 0.787,
+    "result_json_tree_sha256": null,
+    "tasks": []
+  },
+  "required_artifacts": [
+    "exact command and environment",
+    "source commit and dirty state",
+    "Harbor version",
+    "cold Harbor run archive",
+    "warm Harbor run archive",
+    "per-task result.json files"
+  ],
+  "missing_artifacts": [
+    "exact command and environment",
+    "source commit and dirty state",
+    "Harbor version",
+    "cold Harbor run archive",
+    "warm Harbor run archive",
+    "per-task result.json files"
+  ],
+  "evidence": "assets/benchmark_v2.png"
+}

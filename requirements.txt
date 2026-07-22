@@ -1,5 +1,5 @@
 # OpenSpace core dependencies
-litellm>=1.70.0,<1.82.7  # pinned to avoid PYSEC-2026-2 supply-chain compromise (1.82.7/1.82.8 were malicious)
+litellm>=1.83.7,<2,!=1.82.7,!=1.82.8  # excludes compromised 1.82.7/1.82.8 and includes the >=1.83.7 SQLi fix
 python-dotenv>=1.0.0
 openai>=1.0.0
 jsonschema>=4.25.0
@@ -22,11 +22,11 @@ websockets>=13.0
 # pyobjc-core>=12.0; sys_platform == 'darwin'
 # pyobjc-framework-cocoa>=12.0; sys_platform == 'darwin'
 # pyobjc-framework-quartz>=12.0; sys_platform == 'darwin'
-# atomacos>=3.2.0; sys_platform == 'darwin'
 
 # # Linux-specific dependencies (local server)
 # python-xlib>=0.33; sys_platform == 'linux'
-# pyatspi>=2.38.0; sys_platform == 'linux'
+# pyatspi is installed by the Linux distribution (for Debian/Ubuntu:
+# python3-pyatspi); the similarly named PyPI package is obsolete.
 
 # # Windows-specific dependencies (local server)
 # pywinauto>=0.6.8; sys_platform == 'win32'

@@ -8,13 +8,16 @@ version = "2.0.0"
 description = "OpenSpace"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "OpenSpace Team@HKUDS"}
 ]
 
 dependencies = [
-    "litellm>=1.70.0,<1.82.7",  # pinned to avoid PYSEC-2026-2 supply-chain compromise (1.82.7/1.82.8 were malicious)
+    # 1.82.7/1.82.8 were removed after a supply-chain compromise; 1.83.7 also
+    # includes the SQL-injection fix required by the current Harbor release.
+    "litellm>=1.83.7,<2,!=1.82.7,!=1.82.8",
     "python-dotenv>=1.0.0",
     "openai>=1.0.0",
     "jsonschema>=4.25.0",
@@ -37,12 +40,10 @@ macos = [
     "pyobjc-core>=12.0",
     "pyobjc-framework-cocoa>=12.0",
     "pyobjc-framework-quartz>=12.0",
-    "atomacos>=3.2.0",
 ]
 
 linux = [
     "python-xlib>=0.33",
-    "pyatspi>=2.38.0",
     "numpy>=1.24.0",
 ]
 
@@ -58,22 +59,44 @@ dev = [
     "black>=23.0.0",
     "flake8>=6.0.0",
     "mypy>=1.0.0",
+    "ruff>=0.12.0",
 ]
 
 communication = [
     "lark-oapi>=1.4.20",
 ]
 
+semantic-search = [
+    "fastembed>=0.7.3,<1",
+    "rank-bm25>=0.2.2,<1",
+]
+
+benchmark = [
+    "harbor>=0.20,<0.21",
+]
+
 all = [
-    "openspace[macos]; sys_platform == 'darwin'",
-    "openspace[linux]; sys_platform == 'linux'",
-    "openspace[windows]; sys_platform == 'win32'",
-    "openspace[communication,dev]",
+    "pyobjc-core>=12.0; sys_platform == 'darwin'",
+    "pyobjc-framework-cocoa>=12.0; sys_platform == 'darwin'",
+    "pyobjc-framework-quartz>=12.0; sys_platform == 'darwin'",
+    "python-xlib>=0.33; sys_platform == 'linux'",
+    "pywinauto>=0.6.8; sys_platform == 'win32'",
+    "pywin32>=306; sys_platform == 'win32'",
+    "PyGetWindow>=0.0.9; sys_platform == 'win32'",
+    "lark-oapi>=1.4.20",
+    "fastembed>=0.7.3,<1",
+    "rank-bm25>=0.2.2,<1",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.12.0",
 ]
 
 [project.urls]
-Repository = "https://github.com/HKUDS/OpenSpace"
-"Bug Tracker" = "https://github.com/HKUDS/OpenSpace/issues"
+Repository = "https://github.com/newunivers-company/nu-openspace"
+"Bug Tracker" = "https://github.com/newunivers-company/nu-openspace/issues"
 
 [project.scripts]
 openspace = "openspace.entrypoints.cli.main:run_main"

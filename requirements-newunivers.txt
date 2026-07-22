@@ -1,0 +1,5 @@
+# Optional NewUnivers integrations for a sibling-repository checkout.
+# Run from the nu-openspace repository root:
+#   uv pip install --python .venv/bin/python -r requirements-newunivers.txt
+-e ../nu-llm-routing-lib
+-e ../nu-resource-gen-lib

@@ -9,7 +9,7 @@ Embedding strategy:
     ``search_skills`` and the clawhub cloud platform)
   - Model: ``text-embedding-3-small`` via OpenAI-compatible API
   - Embeddings are cached in-memory keyed by ``skill_id`` and optionally
-    persisted to a pickle file for cross-session reuse
+    persisted to a non-executable JSON file for cross-session reuse
 
 Reused by:
   - ``SkillRegistry.select_skills_with_llm`` — pre-filter before LLM selection
@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import math
-import pickle
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openspace.utils.logging import Logger
+from openspace.utils.safe_json_cache import atomic_write_json, load_json_object
 
 logger = Logger.get_logger(__name__)
 
@@ -43,7 +43,7 @@ PREFILTER_THRESHOLD = 10
 BM25_CANDIDATES_MULTIPLIER = 3  # top_k * 3
 
 # Cache version — increment when format changes
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 
 @dataclass
@@ -350,7 +350,7 @@ class SkillRanker:
         return None
 
     def _cache_file(self) -> Path:
-        return self._cache_dir / f"skill_embeddings_v{_CACHE_VERSION}.pkl"
+        return self._cache_dir / f"skill_embeddings_v{_CACHE_VERSION}.json"
 
     def _load_cache(self) -> None:
         """Load embedding cache from disk."""
@@ -358,10 +358,24 @@ class SkillRanker:
         if not path.exists():
             return
         try:
-            with open(path, "rb") as f:
-                data = pickle.load(f)
+            data = load_json_object(path)
             if isinstance(data, dict) and data.get("version") == _CACHE_VERSION:
-                self._embedding_cache = data.get("embeddings", {})
+                raw_embeddings = data.get("embeddings", {})
+                if not isinstance(raw_embeddings, dict):
+                    raise ValueError("embeddings must be an object")
+                validated: Dict[str, List[float]] = {}
+                for skill_id, embedding in raw_embeddings.items():
+                    if not isinstance(skill_id, str) or not isinstance(embedding, list) or not embedding:
+                        raise ValueError("invalid skill embedding entry")
+                    if any(
+                        isinstance(item, bool)
+                        or not isinstance(item, (int, float))
+                        or not math.isfinite(float(item))
+                        for item in embedding
+                    ):
+                        raise ValueError("skill embedding contains a non-finite number")
+                    validated[skill_id] = [float(item) for item in embedding]
+                self._embedding_cache = validated
                 logger.debug(f"Loaded {len(self._embedding_cache)} skill embeddings from cache")
         except Exception as e:
             logger.warning(f"Failed to load skill embedding cache: {e}")
@@ -369,7 +383,7 @@ class SkillRanker:
 
     def _save_cache(self) -> None:
         """Persist embedding cache to disk."""
-        if not self._enable_cache or not self._embedding_cache:
+        if not self._enable_cache:
             return
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -379,8 +393,7 @@ class SkillRanker:
                 "last_updated": datetime.now().isoformat(),
                 "embeddings": self._embedding_cache,
             }
-            with open(self._cache_file(), "wb") as f:
-                pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            atomic_write_json(self._cache_file(), data)
         except Exception as e:
             logger.warning(f"Failed to save skill embedding cache: {e}")
 

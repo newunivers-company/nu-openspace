@@ -35,7 +35,7 @@ Set GUI `"mode": "server"` in `openspace/config/config_grounding.json`:
 <summary><b>macOS</b></summary>
 
 ```bash
-pip install pyobjc-core pyobjc-framework-cocoa pyobjc-framework-quartz atomacos
+pip install pyobjc-core pyobjc-framework-cocoa pyobjc-framework-quartz
 ```
 
 **Permissions required** (macOS will prompt automatically on first run):
@@ -50,8 +50,8 @@ pip install pyobjc-core pyobjc-framework-cocoa pyobjc-framework-quartz atomacos
 <summary><b>Linux</b></summary>
 
 ```bash
-pip install python-xlib pyatspi numpy
-sudo apt install at-spi2-core python3-tk scrot
+pip install python-xlib numpy
+sudo apt install at-spi2-core python3-pyatspi python3-tk scrot
 ```
 
 > **Optional:** `wmctrl` (window management), `libx11-dev` + `libxfixes-dev` (cursor in screenshots)

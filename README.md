@@ -221,7 +221,11 @@ Run the agent in a way that leaves useful evidence.
 
 ### 📊 Terminal-Bench 2.1: Self-Evolution That Shows Up in the Score
 
-With the same frozen Hy3 backbone, OpenSpace improves from a 65.2% Cold run to a 78.7% Warm run as its trusted skill library evolves.
+The project reports that, with the same frozen Hy3 backbone, OpenSpace improved
+from a 65.2% Cold run to a 78.7% Warm run as its trusted skill library evolved.
+The historical raw Harbor trial directories and exact run metadata are not in
+this repository, so the chart is not independently reproducible yet. See the
+[benchmark artifact status and current reproduction protocol](benchmarks/terminal_bench/README.md#published-result-artifact-status).
 
 <div align="center">
   <img src="assets/benchmark_v2.png" width="100%" alt="OpenSpace and Hy3 performance on Terminal-Bench 2.1, including leaderboard standing, task-family scores, and capability profile">
@@ -249,7 +253,7 @@ With the same frozen Hy3 backbone, OpenSpace improves from a 65.2% Cold run to a
 🌐 **Just want to explore?** Browse community skills, evolution lineage at **[open-space.cloud](https://open-space.cloud)** — no installation needed.
 
 ```bash
-git clone https://github.com/HKUDS/OpenSpace.git && cd OpenSpace
+git clone https://github.com/newunivers-company/nu-openspace.git && cd nu-openspace
 pip install -e .
 openspace-mcp --help   # verify installation
 ```
@@ -257,8 +261,8 @@ openspace-mcp --help   # verify installation
 > [!TIP]
 > **Slow clone?** The `assets/` folder (~50 MB of images) makes the default clone large. Use this lightweight alternative to skip it:
 > ```bash
-> git clone --filter=blob:none --sparse https://github.com/HKUDS/OpenSpace.git
-> cd OpenSpace
+> git clone --filter=blob:none --sparse https://github.com/newunivers-company/nu-openspace.git
+> cd nu-openspace
 > git sparse-checkout set --no-cone '/*' '!/assets/'
 > pip install -e .
 > ```
@@ -280,7 +284,7 @@ Install OpenSpace for this host agent.
 
 If an OpenSpace repo is already open, use its current repository root as
 OPENSPACE_WORKSPACE. Otherwise, clone it first:
-`git clone https://github.com/HKUDS/OpenSpace.git && cd OpenSpace`
+`git clone https://github.com/newunivers-company/nu-openspace.git && cd nu-openspace`
 
 First read:
 - README.md -> Quick Start -> Path A: For Your Agent
@@ -295,7 +299,7 @@ Then:
    Preserve existing config and unrelated MCP servers.
 3. Configure an MCP server named `openspace`. Prefer stdio for local use:
    `command: openspace-mcp`. Use streamable HTTP only if this host cannot use
-   stdio or needs a standalone/remote server.
+   stdio or needs a same-host standalone server.
 4. Set `OPENSPACE_WORKSPACE` to the absolute repo root and
    `OPENSPACE_HOST_SKILL_DIRS` to the host agent's skill directory.
 5. Copy `openspace/host_skills/delegate-task` and
@@ -325,7 +329,7 @@ directory is missing, stop and tell me exactly what is missing.
       "toolTimeout": 600,
       "env": {
         "OPENSPACE_HOST_SKILL_DIRS": "/path/to/your/agent/skills",
-        "OPENSPACE_WORKSPACE": "/path/to/OpenSpace",
+        "OPENSPACE_WORKSPACE": "/path/to/nu-openspace",
         "OPENSPACE_CLOUD_MODE": "live",
         "OPENSPACE_CLOUD_API_KEY": "sk-xxx (optional, for cloud)"
       }
@@ -347,13 +351,34 @@ directory is missing, stop and tell me exactly what is missing.
 > - SSE endpoint: `http://127.0.0.1:8080/sse`
 > - streamable HTTP endpoint: `http://127.0.0.1:8081/mcp`
 >
-> `stdio` is the simplest option. HTTP modes keep OpenSpace as a standalone server, but **host-specific registration syntax** and **host-side timeouts** still apply.
+> `stdio` is the simplest option. HTTP modes keep OpenSpace as a standalone
+> server but intentionally bind to loopback only because FastMCP application
+> authentication is not configured here. For remote clients, keep OpenSpace on
+> `127.0.0.1`/`::1` and use an authenticated TLS reverse proxy or SSH tunnel.
+> **Host-specific registration syntax** and **host-side timeouts** still apply.
+
+### NewUnivers routing and resource catalogs (optional)
+
+In the NewUnivers sibling-repository layout, install both libraries without
+copying or modifying them:
+
+```bash
+uv pip install --python .venv/bin/python -r requirements-newunivers.txt
+export OPENSPACE_NU_LLM_ROUTER_CONFIG=../nu-llm-routing-lib/configs/byteplus.production.json
+```
+
+When present, OpenSpace automatically registers four deferred meta tools:
+`nu_llm_route`, `nu_resource_catalog`, `nu_resource_health`, and
+`nu_resource_preflight`. They provide deterministic routing diagnostics,
+free-first candidate discovery, credential/local availability, and policy dry
+runs. No tool exposes live asset or model generation, so paid/remote execution
+remains an explicit operator action.
 
 **② Copy skills** into your agent's skills directory:
 
 ```bash
-cp -r OpenSpace/openspace/host_skills/delegate-task/ /path/to/your/agent/skills/
-cp -r OpenSpace/openspace/host_skills/skill-discovery/ /path/to/your/agent/skills/
+cp -r nu-openspace/openspace/host_skills/delegate-task/ /path/to/your/agent/skills/
+cp -r nu-openspace/openspace/host_skills/skill-discovery/ /path/to/your/agent/skills/
 ```
 
 Done. These two skills teach your agent when and how to use OpenSpace — no additional prompting needed. Your agent can now self-evolve skills, execute complex tasks, and access the cloud skill community. You can also add your own custom skills; see [Skills](#skills).
@@ -399,7 +424,11 @@ OpenSpace discovers skills from `OPENSPACE_HOST_SKILL_DIRS`, configured `skills.
 
 Each discovered skill has a `.skill_id` sidecar for stable tracking. New project or user skills can omit it; OpenSpace creates one on first discovery. Keep `.skill_id` when you want a copied skill to remain the same logical skill, and remove it before first discovery when you are creating an independent skill. Cloud upload requires the matching local SkillStore record to be `trusted`; both public and private uploads fail closed for provisional or unknown records. The local trust state is not sent to the cloud, and `.skill_id` is skipped as a regular uploaded file.
 
-All discovered skills pass `check_skill_safety` before loading. Skills with dangerous patterns, such as prompt injection or credential exfiltration, are blocked and logged.
+All discovered skills pass `check_skill_safety` before loading. Known high-risk
+prompt-injection, credential-exfiltration, remote-script-pipeline, and malware
+patterns are blocked and logged; lower-confidence signals are retained for
+review. This regex layer is defense in depth, not a substitute for process or
+filesystem sandboxing.
 
 </details>
 
@@ -425,6 +454,12 @@ cd apps/dashboard
 npm install        # only needed once
 npm run dev    
 ```
+
+The default loopback bind needs no token. Before binding the dashboard to a
+non-loopback address, set a long random `OPENSPACE_DASHBOARD_TOKEN` and terminate
+TLS at a trusted reverse proxy. The server refuses an unauthenticated remote
+bind; browser users sign in at `/auth` and API clients use
+`Authorization: Bearer <token>`.
 
 📖 **Frontend setup guide**: [`apps/dashboard/README.md`](apps/dashboard/README.md)
 
@@ -644,6 +679,7 @@ OpenSpace/
 │   ├── dashboard/                        # Dashboard UI (React + Tailwind)
 │   └── tui/                              # TypeScript terminal UI
 ├── benchmarks/
+│   ├── terminal_bench/                   # Harbor runner + result manifest contract
 │   └── gdpval/                           # Legacy v1 benchmark materials
 ├── examples/
 │   └── my-daily-monitor/                 # Legacy v1 generated example and assets

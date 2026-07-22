@@ -246,7 +246,7 @@ def _load_config(args, *, quiet: bool = False) -> OpenSpaceConfig:
     if isinstance(settings_thinking, bool):
         cli_overrides["llm_enable_thinking"] = settings_thinking
 
-    max_iter = int(os.environ.get("OPENSPACE_MAX_ITERATIONS", "20"))
+    max_iter_raw = os.environ.get("OPENSPACE_MAX_ITERATIONS", "").strip()
     enable_rec = os.environ.get("OPENSPACE_ENABLE_RECORDING", "true").lower() in ("true", "1", "yes")
     backend_scope_raw = os.environ.get("OPENSPACE_BACKEND_SCOPE")
     backend_scope = (
@@ -255,8 +255,8 @@ def _load_config(args, *, quiet: bool = False) -> OpenSpaceConfig:
     )
     config_path = build_grounding_config_path()
 
-    if 'grounding_max_iterations' not in cli_overrides:
-        cli_overrides['grounding_max_iterations'] = max_iter
+    if max_iter_raw and 'grounding_max_iterations' not in cli_overrides:
+        cli_overrides['grounding_max_iterations'] = int(max_iter_raw)
     cli_overrides['enable_recording'] = enable_rec
     if backend_scope is not None:
         cli_overrides['backend_scope'] = backend_scope

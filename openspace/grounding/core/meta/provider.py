@@ -6,6 +6,7 @@ from ..exceptions import ErrorCode, GroundingError
 from ..provider import Provider
 from ..types import BackendType, SessionConfig
 from .tool import META_TOOLS, _BaseMetaTool
+from .newunivers_tools import optional_meta_tool_classes
 
 if TYPE_CHECKING:
     from ..grounding_client import GroundingClient
@@ -17,7 +18,8 @@ class MetaProvider(Provider):
     def __init__(self, client: "GroundingClient"):
         super().__init__(BackendType.META, {})
         self._client = client
-        self._tools: List[_BaseMetaTool] = [tool_cls(client) for tool_cls in META_TOOLS]
+        tool_classes = [*META_TOOLS, *optional_meta_tool_classes()]
+        self._tools: List[_BaseMetaTool] = [tool_cls(client) for tool_cls in tool_classes]
 
     async def initialize(self):
         self.is_initialized = True

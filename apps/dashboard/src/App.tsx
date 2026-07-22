@@ -1,12 +1,14 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, RouterProvider, createBrowserRouter } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
-import DashboardPage from './pages/DashboardPage';
-import EvolutionPage from './pages/EvolutionPage';
-import SkillsPage from './pages/SkillsPage';
-import SkillDetailPage from './pages/SkillDetailPage';
-import WorkflowsPage from './pages/WorkflowsPage';
-import WorkflowDetailPage from './pages/WorkflowDetailPage';
-import AgentTracePage from './pages/AgentTracePage';
+
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const EvolutionPage = lazy(() => import('./pages/EvolutionPage'));
+const SkillsPage = lazy(() => import('./pages/SkillsPage'));
+const SkillDetailPage = lazy(() => import('./pages/SkillDetailPage'));
+const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'));
+const WorkflowDetailPage = lazy(() => import('./pages/WorkflowDetailPage'));
+const AgentTracePage = lazy(() => import('./pages/AgentTracePage'));
 
 const router = createBrowserRouter([
   {
@@ -26,5 +28,15 @@ const router = createBrowserRouter([
 ]);
 
 export default function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">
+          Loading OpenSpace…
+        </div>
+      }
+    >
+      <RouterProvider router={router} />
+    </Suspense>
+  );
 }

@@ -72,6 +72,18 @@ npm run dev
 
 ## Advanced Configuration
 
+### Authentication and remote access
+
+Loopback access is open by default. A non-loopback backend bind is refused
+unless `OPENSPACE_DASHBOARD_TOKEN` is set. Put TLS in front of any remote
+deployment, then sign in at the backend `/auth` route or send the token as an
+`Authorization: Bearer ...` header for API calls.
+
+```bash
+export OPENSPACE_DASHBOARD_TOKEN="$(openssl rand -hex 32)"
+openspace-dashboard --host 0.0.0.0 --port 7788
+```
+
 ### Bypass the Vite proxy
 
 If you prefer to call the backend directly (e.g. for debugging), you can set `VITE_API_BASE_URL` to the full backend URL:

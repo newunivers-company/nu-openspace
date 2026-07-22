@@ -21,7 +21,38 @@ logger = Logger.get_logger(__name__)
 SKILL_FILENAME = "SKILL.md"
 
 _SAFETY_RULES = [
-    ("blocked.malware",         re.compile(r"(ClawdAuthenticatorTool)", re.IGNORECASE)),
+    ("blocked.malware", re.compile(r"(ClawdAuthenticatorTool)", re.IGNORECASE)),
+    (
+        "blocked.prompt_injection",
+        re.compile(
+            r"\b(?:ignore|disregard|override|forget)\b[\s\S]{0,80}"
+            r"\b(?:previous|prior|system|developer)\b[\s\S]{0,40}"
+            r"\b(?:instruction|instructions|message|prompt|rules?)\b"
+            r"|\b(?:reveal|print|show|leak|expose)\b[\s\S]{0,60}"
+            r"\b(?:system|developer)\b[\s\S]{0,30}"
+            r"\b(?:prompt|message|instructions?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "blocked.credential_exfiltration",
+        re.compile(
+            r"\b(?:api[-_ ]?key|access[-_ ]?token|password|private key|secret|credentials?)\b"
+            r"[\s\S]{0,180}\b(?:send|upload|post|transmit|exfiltrat(?:e|ion))\b"
+            r"[\s\S]{0,120}\b(?:webhook|https?://|external server|remote host)\b"
+            r"|\b(?:send|upload|post|transmit|exfiltrat(?:e|ion))\b"
+            r"[\s\S]{0,120}\b(?:api[-_ ]?key|access[-_ ]?token|password|private key|secret|credentials?)\b"
+            r"[\s\S]{0,120}\b(?:webhook|https?://|external server|remote host)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "blocked.remote_script_pipeline",
+        re.compile(
+            r"\b(?:curl|wget)\b[^\n|]{0,500}\|\s*(?:sudo\s+)?(?:sh|bash)\b",
+            re.IGNORECASE,
+        ),
+    ),
     ("suspicious.keyword",      re.compile(r"(malware|stealer|phish|phishing|keylogger)", re.IGNORECASE)),
     ("suspicious.secrets",      re.compile(r"(api[-_ ]?key|token|password|private key|secret)", re.IGNORECASE)),
     ("suspicious.crypto",       re.compile(r"(wallet|seed phrase|mnemonic|crypto)", re.IGNORECASE)),
@@ -30,7 +61,14 @@ _SAFETY_RULES = [
     ("suspicious.url_shortener", re.compile(r"(bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd)", re.IGNORECASE)),
 ]
 
-_BLOCKING_FLAGS = frozenset({"blocked.malware"})
+_BLOCKING_FLAGS = frozenset(
+    {
+        "blocked.malware",
+        "blocked.prompt_injection",
+        "blocked.credential_exfiltration",
+        "blocked.remote_script_pipeline",
+    }
+)
 
 
 def check_skill_safety(text: str) -> List[str]:
