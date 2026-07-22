@@ -4,7 +4,7 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .types import BackendType, SessionConfig, SessionInfo, SessionStatus, ToolResult, ToolStatus
+from .types import BackendType, SessionConfig, SessionInfo, SessionStatus, ToolResult
 from .exceptions import ErrorCode, GroundingError
 from .tool import BaseTool
 from .provider import Provider, ProviderRegistry

@@ -45,7 +45,7 @@ class VideoRecorder:
             
             if success:
                 self.is_recording = True
-                logger.info(f"Video recording started")
+                logger.info("Video recording started")
                 return True
             else:
                 logger.warning("Video recording failed to start")

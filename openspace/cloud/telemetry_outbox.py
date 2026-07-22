@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Generator, Iterable
+from typing import Any, Generator
 
 from openspace.config.constants import PROJECT_ROOT
 from openspace.cloud.redaction import redact_telemetry_payload

@@ -483,7 +483,6 @@ def strip_all_leading_env_vars(
         m = _LEADING_ENV_ASSIGN_RE.match(remaining)
         if not m:
             break
-        name = m.group("name")
         # Reconstruct the full token to check against BINARY_HIJACK.
         full_token = remaining[m.start() : m.end()].strip()
         if preserve_binary_hijack and _BINARY_HIJACK_VARS.match(full_token):

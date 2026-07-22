@@ -157,7 +157,7 @@ class FeatureChecker:
             if available:
                 logger.info(f"Window management check: {'available' if available else 'unavailable'} - supported methods: {', '.join(available_methods)}")
             else:
-                logger.warning(f"Window management check failed - platform adapter missing required methods")
+                logger.warning("Window management check failed - platform adapter missing required methods")
             
             return available
             

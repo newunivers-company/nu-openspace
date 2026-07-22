@@ -401,7 +401,6 @@ class MemoryWriteTool(BaseTool):
 
     async def check_permissions(self, input: dict[str, Any], context: Any = None):
         from openspace.grounding.core.permissions import (
-            PermissionAllow,
             check_write_permission_for_tool,
             deny_missing_permission_context,
         )

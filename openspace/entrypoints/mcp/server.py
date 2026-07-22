@@ -109,14 +109,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from openspace.entrypoints.mcp.response import (
+from openspace.entrypoints.mcp.response import (  # noqa: E402
     format_task_result as _format_task_result,
     json_error as _json_error,
     json_ok as _json_ok,
 )
-from openspace.runtime import ExecutionRequest
+from openspace.runtime import ExecutionRequest  # noqa: E402
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 _fastmcp_kwargs: dict = {}
 try:

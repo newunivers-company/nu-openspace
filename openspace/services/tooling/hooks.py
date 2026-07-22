@@ -2246,10 +2246,7 @@ def _load_configured_hook_specs(
 def _settings_hook_specs(event: HookEvent, cwd: Path) -> list[ConfiguredHookSpec]:
     specs: list[ConfiguredHookSpec] = []
     try:
-        from openspace.services.runtime_support.settings import (
-            get_project_root,
-            get_settings_with_errors,
-        )
+        from openspace.services.runtime_support.settings import get_settings_with_errors
 
         snapshot = get_settings_with_errors(cwd)
         specs.extend(
@@ -2262,10 +2259,8 @@ def _settings_hook_specs(event: HookEvent, cwd: Path) -> list[ConfiguredHookSpec
                 session_scoped=False,
             )
         )
-        project_root = get_project_root(cwd)
     except Exception:
         logger.debug("Failed to load OpenSpace settings hooks", exc_info=True)
-        project_root = cwd
 
     return specs
 

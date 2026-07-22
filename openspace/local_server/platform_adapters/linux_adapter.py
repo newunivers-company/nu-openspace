@@ -194,7 +194,7 @@ class LinuxAdapter:
                 states = element.getState().get_states()
                 result['states'] = [StateType._enum_lookup[st].split('_', 1)[1].lower() 
                                    for st in states if st in StateType._enum_lookup]
-            except:
+            except Exception:
                 result['states'] = []
             
             # Get attributes
@@ -202,7 +202,7 @@ class LinuxAdapter:
                 attributes = element.get_attributes()
                 if attributes:
                     result['attributes'] = dict(attributes)
-            except:
+            except Exception:
                 result['attributes'] = {}
             
             # Get position and size (if visible)
@@ -212,7 +212,7 @@ class LinuxAdapter:
                     bbox = component.getExtents(pyatspi.XY_SCREEN)
                     result['position'] = {'x': bbox[0], 'y': bbox[1]}
                     result['size'] = {'width': bbox[2], 'height': bbox[3]}
-                except:
+                except Exception:
                     pass
             
             # Get text content
@@ -221,7 +221,7 @@ class LinuxAdapter:
                 text = text_obj.getText(0, text_obj.characterCount)
                 if text:
                     result['text'] = text.replace("\ufffc", "").replace("\ufffd", "")
-            except:
+            except Exception:
                 pass
             
             # Recursively get child elements
@@ -335,7 +335,7 @@ class LinuxAdapter:
                                     text_obj = component.queryText()
                                     output = text_obj.getText(0, text_obj.characterCount)
                                     return output.rstrip() if output else None
-                                except:
+                                except Exception:
                                     continue
             
             return None
@@ -354,7 +354,7 @@ class LinuxAdapter:
             for i in range(element.childCount):
                 child = element.getChildAtIndex(i)
                 terminals.extend(self._find_terminals(child))
-        except:
+        except Exception:
             pass
         
         return terminals
@@ -408,7 +408,7 @@ class LinuxAdapter:
                             key, value = line.strip().split('=', 1)
                             os_info[key] = value.strip('"')
                 distro = os_info.get('PRETTY_NAME', 'Unknown Linux')
-            except:
+            except Exception:
                 distro = 'Unknown Linux'
             
             # Get kernel version
@@ -456,7 +456,7 @@ class LinuxAdapter:
                     size = pyautogui.size()
                     screen_width = size.width
                     screen_height = size.height
-            except:
+            except Exception:
                 screen_width, screen_height = 1920, 1080
             
             command = [

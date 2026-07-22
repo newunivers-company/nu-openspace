@@ -10,9 +10,6 @@ from openspace.utils.logging import Logger
 from openspace.utils.ui import create_ui, OpenSpaceUI
 from openspace.utils.ui_integration import UIIntegration
 from openspace.utils.cli_display import CLIDisplay
-
-logger = Logger.get_logger(__name__)
-
 from openspace.entrypoints.cli.text_loop import UIManager, interactive_mode, single_query_mode
 from openspace.entrypoints.tui.controller import (
     _restore_console_logs,
@@ -20,6 +17,7 @@ from openspace.entrypoints.tui.controller import (
     tui_mode,
 )
 
+logger = Logger.get_logger(__name__)
 
 
 def _create_argument_parser() -> argparse.ArgumentParser:
@@ -282,7 +280,7 @@ def _load_config(args, *, quiet: bool = False) -> OpenSpaceConfig:
                 print("✓ Using default configuration")
         
         if args.model and not quiet:
-            print(f"✓ CLI overrides: llm_model")
+            print("✓ CLI overrides: llm_model")
         
         if args.log_level:
             Logger.set_level(args.log_level)

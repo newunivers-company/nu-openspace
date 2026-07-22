@@ -62,7 +62,6 @@ if TYPE_CHECKING:
     from .registry import SkillRegistry
     from openspace.llm import LLMClient
     from openspace.grounding.core.tool import BaseTool
-    from openspace.grounding.core.quality.types import ToolQualityRecord
 
 logger = Logger.get_logger(__name__)
 
@@ -1634,8 +1633,8 @@ class SkillEvolver:
                     f"context anchors):\n\n{_truncate(current_on_disk, _SKILL_CONTENT_MAX_CHARS)}\n\n"
                 )
             retry_prompt += (
-                f"Please fix the issue and generate the edit again. "
-                f"Follow the same output format as before."
+                "Please fix the issue and generate the edit again. "
+                "Follow the same output format as before."
             )
             msg_history.append({"role": "user", "content": retry_prompt})
 

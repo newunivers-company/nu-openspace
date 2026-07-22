@@ -94,7 +94,7 @@ class GUISession(BaseSession):
                                 screen_size = actual_screen_size
                             else:
                                 raise RuntimeError("Could not get screenshot")
-                        except Exception as e:
+                        except Exception:
                             # Fallback to pyautogui detection
                             actual_screen_size = await self.gui_connector.get_screen_size()
                             if actual_screen_size:

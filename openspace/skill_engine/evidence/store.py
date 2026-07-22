@@ -1772,9 +1772,7 @@ class EvidenceStore:
                     metadata_json=metadata_json,
                 ),
             )
-            first_seen_watermark = watermark
         else:
-            first_seen_watermark = int(existing["first_seen_watermark"])
             self._conn.execute(
                 """
                 UPDATE resource_refs

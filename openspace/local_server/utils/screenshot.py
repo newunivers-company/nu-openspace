@@ -241,7 +241,7 @@ class ScreenshotHelper:
                     
                     try:
                         font = ImageFont.truetype("Arial.ttf", 20)
-                    except:
+                    except Exception:
                         font = ImageFont.load_default()
                     
                     draw.text((x, y), text, fill=color, font=font)

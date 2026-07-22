@@ -379,7 +379,7 @@ def execute_command_with_verification():
                         windows = platform_adapter.list_windows() if hasattr(platform_adapter, 'list_windows') else []
                         if not any(window_name.lower() in str(w).lower() for w in windows):
                             verification_passed = False
-                except:
+                except Exception:
                     verification_passed = False
             
             if verification_passed:
@@ -662,7 +662,6 @@ def activate_window():
     data = request.json
     window_name = data.get("window_name")
     strict = data.get("strict", False)
-    by_class_name = data.get("by_class", False)
     
     if not window_name:
         return jsonify({'status': 'error', 'message': 'window_name required'}), 400
@@ -689,7 +688,6 @@ def close_window():
     data = request.json
     window_name = data.get("window_name")
     strict = data.get("strict", False)
-    by_class_name = data.get("by_class", False)
     
     if not window_name:
         return jsonify({'status': 'error', 'message': 'window_name required'}), 400
@@ -854,7 +852,7 @@ def end_recording():
             try:
                 recording_process.kill()
                 recording_process.wait()
-            except:
+            except Exception:
                 pass
             recording_process = None
         return jsonify({

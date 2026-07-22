@@ -66,7 +66,6 @@ from .types import (
     PermissionAsk,
     PermissionBehavior,
     PermissionDeny,
-    PermissionMode,
     PermissionPassthrough,
     PermissionResult,
     PermissionRule,
@@ -1424,7 +1423,6 @@ async def bash_tool_has_permission(
     """
     del description  # reserved for future classifier wiring
     command = command.strip()
-    mode: PermissionMode = context.mode
 
     # §0 — empty command short-circuit (defence).
     if not command:

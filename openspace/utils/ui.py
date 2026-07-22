@@ -82,7 +82,7 @@ class OpenSpaceUI:
         try:
             size = shutil.get_terminal_size((80, 24))
             return size.columns, size.lines
-        except:
+        except Exception:
             return 80, 24
     
     def _clear_screen(self):

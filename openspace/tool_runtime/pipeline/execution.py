@@ -3359,4 +3359,3 @@ def _build_permission_denied_retry_message(
 # ═══════════════════════════════════════════════════════════════════════
 # §9  Import guard for asyncio (used by _is_abort_error)
 # ═══════════════════════════════════════════════════════════════════════
-import asyncio  # noqa: E402 — needed for CancelledError check

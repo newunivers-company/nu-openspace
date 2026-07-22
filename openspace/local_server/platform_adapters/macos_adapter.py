@@ -230,32 +230,32 @@ class MacOSAdapter:
             # Get common attributes
             try:
                 result['role'] = element.AXRole if hasattr(element, 'AXRole') else 'unknown'
-            except:
+            except Exception:
                 result['role'] = 'unknown'
             
             try:
                 result['title'] = element.AXTitle if hasattr(element, 'AXTitle') else ''
-            except:
+            except Exception:
                 result['title'] = ''
             
             try:
                 result['description'] = element.AXDescription if hasattr(element, 'AXDescription') else ''
-            except:
+            except Exception:
                 result['description'] = ''
             
             try:
                 result['value'] = str(element.AXValue) if hasattr(element, 'AXValue') else ''
-            except:
+            except Exception:
                 result['value'] = ''
             
             try:
                 result['enabled'] = element.AXEnabled if hasattr(element, 'AXEnabled') else False
-            except:
+            except Exception:
                 result['enabled'] = False
             
             try:
                 result['focused'] = element.AXFocused if hasattr(element, 'AXFocused') else False
-            except:
+            except Exception:
                 result['focused'] = False
             
             # Position and size
@@ -263,14 +263,14 @@ class MacOSAdapter:
                 if hasattr(element, 'AXPosition'):
                     pos = element.AXPosition
                     result['position'] = {'x': pos.x, 'y': pos.y}
-            except:
+            except Exception:
                 pass
             
             try:
                 if hasattr(element, 'AXSize'):
                     size = element.AXSize
                     result['size'] = {'width': size.width, 'height': size.height}
-            except:
+            except Exception:
                 pass
             
             # Recursively get child elements (with limit)
@@ -455,7 +455,7 @@ class MacOSAdapter:
                 else:
                     width, height = 1920, 1080
                     logger.info(f"Using default resolution: {width}x{height}")
-            except:
+            except Exception:
                 width, height = 1920, 1080
                 logger.info(f"Using default resolution: {width}x{height}")
             

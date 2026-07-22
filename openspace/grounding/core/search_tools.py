@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from openspace.grounding.core.tool.base import BaseTool
 import re
 import os
 import httpx
@@ -194,7 +193,7 @@ class ToolRanker:
                 )
                 logger.info(f"Loaded {total} embeddings from cache: {cache_file}")
             else:
-                logger.warning(f"Cache version mismatch or invalid format, starting fresh")
+                logger.warning("Cache version mismatch or invalid format, starting fresh")
                 self._structured_cache = {}
         except Exception as exc:
             logger.warning(f"Failed to load persistent cache: {exc}")
@@ -1046,7 +1045,7 @@ class ToolPreselector(BaseTool):
             tool_names = [t.name for t in tool_list]
             lines.append(f"  All tools: {', '.join(tool_names)}")
             if tool_list:
-                lines.append(f"  Example capabilities:")
+                lines.append("  Example capabilities:")
                 for tool in tool_list[:5]:
                     tool_desc = tool.description or "No description"
                     if len(tool_desc) > 100:
@@ -1151,7 +1150,7 @@ Return ONLY a JSON object (no markdown, no explanation):
         
         # Fallback if no match
         if not utility_tools and not domain_tools:
-            logger.warning(f"LLM filter matched 0 tools, returning all as domain")
+            logger.warning("LLM filter matched 0 tools, returning all as domain")
             return [], tools, llm_filter_info
         
         return utility_tools, domain_tools, llm_filter_info
@@ -1226,7 +1225,7 @@ List keywords for the capabilities needed (comma-separated, brief):"""
                 if backend.lower() == "mcp" and server:
                     prefix = f"   └─ {server}: "
                 else:
-                    prefix = f"   └─ "
+                    prefix = "   └─ "
                 
                 # Limit display to avoid overwhelming output
                 if len(tool_names) <= 8:

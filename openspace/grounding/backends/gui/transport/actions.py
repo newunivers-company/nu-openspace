@@ -202,7 +202,6 @@ def build_pyautogui_command(action_type: str, parameters: Dict[str, Any]) -> str
             return f"pyautogui.dragTo({x}, {y}, 1.0, button='left')"
     
     elif action_type == "SCROLL":
-        dx = parameters.get("dx", 0)
         dy = parameters.get("dy", 0)
         return f"pyautogui.scroll({dy})"
     

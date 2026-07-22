@@ -115,8 +115,6 @@ class SecurityPolicyManager:
         if truncated:
             formatted_cmd_lines.append("  ... (more lines)")
         
-        formatted_command = '\n'.join(formatted_cmd_lines)
-        
         # Show which dangerous commands were detected
         dangerous_list = ', '.join([f"{Colors.RED}{tok}{Colors.RESET}" for tok in dangerous_tokens[:5]])
         

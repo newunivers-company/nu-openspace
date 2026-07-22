@@ -99,7 +99,7 @@ class FilteredStderrWrapper(io.TextIOBase):
             if self._rich_traceback_needs_error_line:
                 # Now we have the complete rich traceback including the error line
                 if self._is_harmless_error():
-                    logger.debug(f"Suppressed harmless rich-formatted MCP server error")
+                    logger.debug("Suppressed harmless rich-formatted MCP server error")
                 else:
                     # Output the full traceback
                     for tb_line in self._traceback_lines:
@@ -119,7 +119,7 @@ class FilteredStderrWrapper(io.TextIOBase):
                 # Check periodically if this is a harmless error
                 if self._is_harmless_error():
                     # Suppress this traceback
-                    logger.debug(f"Suppressed harmless MCP server shutdown error")
+                    logger.debug("Suppressed harmless MCP server shutdown error")
                     self._in_traceback = False
                     self._in_rich_traceback = False
                     self._rich_traceback_needs_error_line = False
@@ -133,7 +133,7 @@ class FilteredStderrWrapper(io.TextIOBase):
                 # Check if this is a harmless cleanup error
                 if self._is_harmless_error():
                     # Suppress this traceback
-                    logger.debug(f"Suppressed harmless MCP server shutdown error")
+                    logger.debug("Suppressed harmless MCP server shutdown error")
                 else:
                     # Output the full traceback
                     for tb_line in self._traceback_lines:

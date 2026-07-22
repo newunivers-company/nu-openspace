@@ -1016,10 +1016,8 @@ def apply_edit_to_file(
     replace_all: bool = False,
 ) -> str:
     """Apply a single string replacement edit."""
-    if replace_all:
-        replacer = lambda s, o, n: s.replace(o, n)
-    else:
-        replacer = lambda s, o, n: s.replace(o, n, 1)
+    def replacer(source: str, old: str, new: str) -> str:
+        return source.replace(old, new) if replace_all else source.replace(old, new, 1)
 
     if new_string != "":
         return replacer(original, old_string, new_string)

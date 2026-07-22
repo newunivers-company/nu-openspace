@@ -81,7 +81,7 @@ def colorize(text: str, color: str = '', bold: bool = False) -> str:
         prefix = Colors.BOLD if bold else ''
         code = color_map.get(color, color)
         return f"{prefix}{code}{text}{Colors.RESET}"
-    except:
+    except Exception:
         return text
 
 

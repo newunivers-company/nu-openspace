@@ -1222,10 +1222,10 @@ def _validate_hooks_schema(
     try:
         from openspace.services.tooling.hooks import is_hook_event
     except Exception:
-        is_hook_event = lambda value: isinstance(  # type: ignore[assignment]
-            value,
-            str,
-        )
+        def _is_string_hook_event(value: Any) -> bool:
+            return isinstance(value, str)
+
+        is_hook_event = _is_string_hook_event  # type: ignore[assignment]
 
     for event_name, matchers in hooks.items():
         event_path = f"hooks.{event_name}"

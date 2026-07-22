@@ -1296,8 +1296,6 @@ def ensure_tool_result_pairing(
             continue
 
         # ── Assistant message ───────────────────────────────────────────
-        tool_call_ids = _get_tool_call_ids_from_message(msg)
-
         # Deduplicate tool_calls within this assistant message
         unique_ids: list[str] = []
         deduped_tool_calls: list[Any] = []

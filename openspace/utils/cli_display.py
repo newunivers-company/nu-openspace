@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """CLI Display utilities for OpenSpace startup and interaction"""
+
+from __future__ import annotations
 
 from typing import TYPE_CHECKING
 

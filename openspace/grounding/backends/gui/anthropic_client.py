@@ -25,7 +25,7 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 # Import utility functions
-from .anthropic_utils import (
+from .anthropic_utils import (  # noqa: E402
     APIProvider,
     COMPUTER_USE_BETA_FLAG,
     PROMPT_CACHING_BETA_FLAG,
@@ -214,7 +214,6 @@ class AnthropicGUIClient:
         
         # Filter images BEFORE adding new screenshot to control message size
         # This is critical to avoid exceeding the 25MB API limit
-        image_truncation_threshold = 10
         if self.only_n_most_recent_images and len(self.messages) > 1:
             # Reserve 1 slot for the screenshot we're about to add
             maybe_filter_to_n_most_recent_images(

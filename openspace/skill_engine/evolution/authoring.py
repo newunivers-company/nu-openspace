@@ -7,6 +7,7 @@ import re
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -420,22 +421,22 @@ class SkillEvolverAuthoringBackend:
             source = sources[0]
             proposed_name = source.record.name
             proposed_dir = staging_dir / "proposed" / source.skill_dir.name
-            apply_fn = lambda content: stage_fix_skill(
+            apply_fn = partial(
+                stage_fix_skill,
                 source.skill_dir,
                 staging_dir,
-                content,
-                PatchType.AUTO,
+                patch_type=PatchType.AUTO,
             )
             target_dir = source.skill_dir
         elif action_type == "DERIVED":
             proposed_name, edit_content = _derived_name(edit_content, sources)
             proposed_dir = staging_dir / "proposed" / proposed_name
-            apply_fn = lambda content: stage_derive_skill(
+            apply_fn = partial(
+                stage_derive_skill,
                 [source.skill_dir for source in sources],
                 staging_dir,
                 proposed_name,
-                content,
-                PatchType.AUTO,
+                patch_type=PatchType.AUTO,
             )
             target_dir = sources[0].skill_dir.parent / proposed_name
         else:

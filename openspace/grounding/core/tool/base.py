@@ -578,14 +578,6 @@ class BaseTool(ABC):
                 backend = self._runtime_info.backend.value
                 server_name = self._runtime_info.server_name
             
-            # Get screenshot (if GUI backend)
-            screenshot = None
-            if self.backend_type == BackendType.GUI and hasattr(self, 'connector'):
-                try:
-                    screenshot = await self.connector.get_screenshot()
-                except Exception as e:
-                    logger.debug(f"Failed to capture screenshot: {e}")
-            
             # Record tool execution with complete runtime information
             await RecordingManager.record_tool_execution(
                 tool_name=self.schema.name,

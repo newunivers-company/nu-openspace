@@ -10,6 +10,7 @@ import copy
 import inspect
 import time
 import uuid
+from functools import partial
 from typing import Any, Callable
 
 from openspace.core.agent_runtime_events import (
@@ -303,9 +304,9 @@ class BackgroundRuntimeManager:
         method = getattr(runtime, method_name, None)
         if method is None and hasattr(runtime, "dispatch"):
             if method_name == "handle_agent_input":
-                method = lambda data: runtime.dispatch("agent_input", data)
+                method = partial(runtime.dispatch, "agent_input")
             elif method_name == "handle_background_control":
-                method = lambda data: runtime.dispatch("background_control", data)
+                method = partial(runtime.dispatch, "background_control")
 
         if method is None:
             raise RuntimeError(f"Bound runtime does not implement {method_name}")

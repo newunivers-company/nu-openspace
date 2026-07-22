@@ -5,10 +5,9 @@ from pathlib import Path
 from typing import Dict, Tuple, Optional
 from openspace.utils.logging import Logger
 from openspace.local_server.feature_checker import FeatureChecker
+from openspace.utils.display import colorize as _c
 
 logger = Logger.get_logger(__name__)
-
-from openspace.utils.display import colorize as _c
 
 
 class HealthStatus:
@@ -22,7 +21,7 @@ class HealthStatus:
     @property
     def fully_available(self) -> bool:
         """Fully available: feature and endpoint are available"""
-        return self.feature_available and (self.endpoint_available == True)
+        return self.feature_available and bool(self.endpoint_available)
     
     def __str__(self):
         if not self.feature_available:
@@ -99,7 +98,7 @@ class HealthChecker:
             if self.test_output_dir.exists() and not any(self.test_output_dir.iterdir()):
                 self.test_output_dir.rmdir()
                 logger.debug(f"Removed empty directory: {self.test_output_dir}")
-        except:
+        except Exception:
             pass
         
         if cleaned > 0:
@@ -313,7 +312,7 @@ class HealthChecker:
             
             # 200 (success), 404 (not found), 501 (not supported) are all acceptable
             if response.status_code in [200, 404, 501]:
-                return True, f"API available"
+                return True, "API available"
             return False, f"HTTP {response.status_code}"
         except Exception as e:
             return False, str(e)[:30]
@@ -372,7 +371,7 @@ class HealthChecker:
                     timeout=5,
                     headers=self._auth_headers(),
                 )
-            except:
+            except Exception:
                 pass
             return False, str(e)[:30]
     

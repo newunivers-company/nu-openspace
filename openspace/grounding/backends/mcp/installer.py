@@ -597,8 +597,8 @@ class MCPInstallerManager:
                 # Only show once to user, no verbose logging
                 print(f"\n{Colors.RED}✗ Server '{server_name}' requires 'uv' to be installed{Colors.RESET}")
                 print(f"{Colors.YELLOW}Please install uv first:")
-                print(f"  • macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh")
-                print(f"  • Or with pip: pip install uv")
+                print("  • macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh")
+                print("  • Or with pip: pip install uv")
                 print(f"  • Or with brew: brew install uv{Colors.RESET}\n")
                 
                 error_msg = f"uvx requires 'uv' to be installed (server: {server_name})"

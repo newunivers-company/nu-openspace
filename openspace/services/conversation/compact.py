@@ -1655,7 +1655,7 @@ def run_post_compact_cleanup(
 #
 # ════════════════════════════════════════════════════════════════════════
 
-from openspace.tool_runtime.pipeline.execution import (
+from openspace.tool_runtime.pipeline.execution import (  # noqa: E402
     BASH_TOOL_NAME,
     FILE_EDIT_TOOL_NAME,
     FILE_READ_TOOL_NAME,
